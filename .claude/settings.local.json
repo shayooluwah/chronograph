@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Set-Location C:\\\\Users\\\\GoDAM\\\\Documents\\\\chronograph; foreach \\($d in @\\('src/components','src/hooks','src/api','src/utils','src/constants'\\)\\) { New-Item -ItemType File -Force \"$d/.gitkeep\" | Out-Null }; Write-Host \"gitkeep files created\")"
+    ]
+  }
+}
