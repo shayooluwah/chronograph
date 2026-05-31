@@ -1,63 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef } from 'react';
 import * as d3 from 'd3';
-import type { HistoricalEvent, EventCategory } from '../types';
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const CATEGORY_COLORS: Record<EventCategory, string> = {
-  birth:        '#4fc3f7',
-  death:        '#ef9a9a',
-  event:        '#fff176',
-  organization: '#a5d6a7',
-  publication:  '#ce93d8',
-  war:          '#ff8a65',
-  discovery:    '#80deea',
-  other:        '#b0bec5',
-};
-
-/**
- * Each category sits at a distinct orbital radius expressed as a fraction of
- * half the shortest viewport dimension. Multiplied at render time so the
- * layout scales to any container.
- */
-const CATEGORY_ORBIT: Record<EventCategory, number> = {
-  birth:        0.37,
-  death:        0.40,
-  discovery:    0.44,
-  publication:  0.47,
-  organization: 0.51,
-  other:        0.53,
-  event:        0.57,
-  war:          0.61,
-};
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Convert a 6-digit hex colour to `rgba(r,g,b,a)`. */
-function hexToRgba(hex: string, alpha: number): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface GraphProps {
-  events:        HistoricalEvent[];
-  year:          number;
-  onEventSelect: (event: HistoricalEvent) => void;
-}
-
-/** Internal datum attached to every event node. */
-interface NodeDatum {
-  event:        HistoricalEvent;
-  finalX:       number;
-  finalY:       number;
-  color:        string;
-  pulsePhase:   number; // radians, randomised per node so they don't pulse in sync
-  pulsePeriod:  number; // ms per full sine cycle, 4–6 s
-}
+import { CATEGORY_COLORS, CATEGORY_ORBIT } from '../constants/categories';
+import { hexToRgba } from '../utils/colors';
+import type { GraphProps, NodeDatum } from '../types';
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -72,15 +17,24 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
   const onSelectRef = useRef(onEventSelect);
   useEffect(() => { onSelectRef.current = onEventSelect; }, [onEventSelect]);
 
-  // Container dimensions — drive a re-run of the D3 effect on resize
-  const [dims, setDims] = useState({ w: 0, h: 0 });
+  /**
+   * Container dimensions are stored in a ref so that ResizeObserver updates
+   * do NOT cause unnecessary re-renders.  A separate `renderKey` counter
+   * is incremented to trigger the D3 effect only when the size actually changes.
+   */
+  const dimsRef  = useRef({ w: 0, h: 0 });
+  const [renderKey, bumpRender] = useReducer((n: number) => n + 1, 0);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    // Eagerly capture initial size so the D3 effect fires on mount
+    dimsRef.current = { w: Math.floor(el.clientWidth), h: Math.floor(el.clientHeight) };
+    bumpRender();
     const obs = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
-      setDims({ w: Math.floor(width), h: Math.floor(height) });
+      dimsRef.current = { w: Math.floor(width), h: Math.floor(height) };
+      bumpRender();
     });
     obs.observe(el);
     return () => obs.disconnect();
@@ -90,6 +44,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
 
   useEffect(() => {
     const svgEl = svgRef.current;
+    const dims  = dimsRef.current;
     if (!svgEl || dims.w === 0 || dims.h === 0) return;
 
     const { w, h } = dims;
@@ -108,7 +63,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
     const defs = svg.append('defs');
 
     // One coloured glow filter per category
-    (Object.entries(CATEGORY_COLORS) as [EventCategory, string][]).forEach(([cat, color]) => {
+    (Object.entries(CATEGORY_COLORS) as [keyof typeof CATEGORY_COLORS, string][]).forEach(([cat, color]) => {
       const f = defs.append('filter')
         .attr('id',     `glow-${cat}`)
         .attr('x',      '-60%')
@@ -116,26 +71,22 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
         .attr('width',  '220%')
         .attr('height', '220%');
 
-      // Blur the alpha shape of the source element
       f.append('feGaussianBlur')
         .attr('in',          'SourceAlpha')
         .attr('stdDeviation', 4)
         .attr('result',      'blurred');
 
-      // Flood the blur with the category colour
       f.append('feFlood')
         .attr('flood-color',   color)
         .attr('flood-opacity', 0.9)
         .attr('result',        'flooded');
 
-      // Mask the flood to the blurred shape
       f.append('feComposite')
         .attr('in',       'flooded')
         .attr('in2',      'blurred')
         .attr('operator', 'in')
         .attr('result',   'coloredGlow');
 
-      // Stack glow behind the original graphic
       const merge = f.append('feMerge');
       merge.append('feMergeNode').attr('in', 'coloredGlow');
       merge.append('feMergeNode').attr('in', 'SourceGraphic');
@@ -176,15 +127,14 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
 
     svg
       .call(zoomBehaviour)
-      .on('dblclick.zoom', null); // keep double-click for users, disable zoom hijack
+      .on('dblclick.zoom', null);
 
     // ── Compute final node positions ──────────────────────────────────────────
 
-    const n         = events.length;
-    const halfMin   = Math.min(w, h) / 2;
+    const n       = events.length;
+    const halfMin = Math.min(w, h) / 2;
 
     const nodeData: NodeDatum[] = events.map((event, i) => {
-      // Evenly space angles; start from the top (−π/2) so first node is at 12 o'clock
       const angle = (2 * Math.PI * i) / (n || 1) - Math.PI / 2;
       const r     = (CATEGORY_ORBIT[event.category] ?? 0.5) * halfMin;
       return {
@@ -193,7 +143,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
         finalY:      cy + r * Math.sin(angle),
         color:       CATEGORY_COLORS[event.category],
         pulsePhase:  Math.random() * Math.PI * 2,
-        pulsePeriod: (4 + Math.random() * 2) * 1000, // 4–6 s in ms
+        pulsePeriod: (4 + Math.random() * 2) * 1000,
       };
     });
 
@@ -206,7 +156,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       .data(nodeData)
       .join('line')
         .attr('x1', cx).attr('y1', cy)
-        .attr('x2', cx).attr('y2', cy) // start collapsed at centre
+        .attr('x2', cx).attr('y2', cy)
         .attr('stroke',       'rgba(255,255,255,0.08)')
         .attr('stroke-width',  1);
 
@@ -219,7 +169,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       .data(nodeData, d => d.event.id)
       .join('g')
         .attr('class',     'node')
-        .attr('transform', `translate(${cx},${cy})`) // start at centre for burst
+        .attr('transform', `translate(${cx},${cy})`)
         .style('cursor',   'pointer');
 
     nodeGroups.append('circle')
@@ -229,25 +179,22 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       .attr('stroke-width', 1.5)
       .attr('filter',       d => `url(#glow-${d.event.category})`);
 
-    // ── Central node (rendered above spokes & event nodes) ────────────────────
+    // ── Central node ─────────────────────────────────────────────────────────
 
     const centralGroup = scene.append('g')
       .attr('class',     'central')
       .attr('transform', `translate(${cx},${cy})`);
 
-    // Outer ambient halo (extra-wide, very faint)
     centralGroup.append('circle')
       .attr('r',      CENTRAL_R * 1.7)
       .attr('fill',   'rgba(160,190,255,0.05)')
       .attr('filter', 'url(#glow-central)');
 
-    // Main filled circle
     centralGroup.append('circle')
       .attr('r',      CENTRAL_R)
       .attr('fill',   'url(#grad-central)')
       .attr('filter', 'url(#glow-central)');
 
-    // Year label
     centralGroup.append('text')
       .attr('text-anchor',       'middle')
       .attr('dominant-baseline', 'central')
@@ -262,41 +209,20 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
     // ── Tooltip ───────────────────────────────────────────────────────────────
 
     const tooltipEl = document.createElement('div');
-    Object.assign(tooltipEl.style, {
-      position:      'fixed',
-      background:    'rgba(8,8,26,0.93)',
-      color:         '#dde4ff',
-      padding:       '5px 10px',
-      borderRadius:  '6px',
-      fontSize:      '12px',
-      fontFamily:    'system-ui, sans-serif',
-      lineHeight:    '1.45',
-      pointerEvents: 'none',
-      opacity:       '0',
-      transition:    'opacity 0.1s',
-      zIndex:        '9999',
-      maxWidth:      '220px',
-      border:        '1px solid rgba(255,255,255,0.14)',
-      boxShadow:     '0 4px 16px rgba(0,0,0,0.4)',
-      whiteSpace:    'pre-wrap',
-    });
+    tooltipEl.className = 'graph-tooltip'; // styles defined in App.css
     document.body.appendChild(tooltipEl);
 
     // ── Interactions ──────────────────────────────────────────────────────────
 
-    /** IDs of currently hovered nodes — pulse skips these so hover scale holds. */
     const hoveredIds = new Set<string>();
 
     nodeGroups
       .on('pointerenter', function (ev, d) {
         hoveredIds.add(d.event.id);
-
-        // Cancel any in-progress pulse transform and scale up smoothly
         d3.select(this).select('circle')
           .interrupt()
           .transition().duration(130).ease(d3.easeCubicOut)
           .attr('transform', 'scale(1.4)');
-
         tooltipEl.textContent = d.event.title;
         tooltipEl.style.opacity = '1';
         tooltipEl.style.left = `${(ev as PointerEvent).clientX + 14}px`;
@@ -308,13 +234,10 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       })
       .on('pointerleave', function (_, d) {
         hoveredIds.delete(d.event.id);
-
-        // Smoothly return to neutral; pulse will take over after the transition
         d3.select(this).select('circle')
           .interrupt()
           .transition().duration(130).ease(d3.easeCubicOut)
           .attr('transform', 'scale(1)');
-
         tooltipEl.style.opacity = '0';
       })
       .on('click', function (ev, d) {
@@ -322,48 +245,32 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
         onSelectRef.current(d.event);
       });
 
-    // ── Entry burst (hyperspace effect) ───────────────────────────────────────
+    // ── Entry burst ───────────────────────────────────────────────────────────
 
-    // Both selections share identical duration + easing so they animate in lock-step
     const BURST_MS = 800;
 
     nodeGroups
-      .transition()
-      .duration(BURST_MS)
-      .ease(d3.easeBackOut)
+      .transition().duration(BURST_MS).ease(d3.easeBackOut)
       .attr('transform', d => `translate(${d.finalX},${d.finalY})`);
 
     linkSels
-      .transition()
-      .duration(BURST_MS)
-      .ease(d3.easeBackOut)
+      .transition().duration(BURST_MS).ease(d3.easeBackOut)
       .attr('x2', d => d.finalX)
       .attr('y2', d => d.finalY);
 
-    // ── Pulse animation (starts after burst completes) ─────────────────────────
+    // ── Pulse animation ───────────────────────────────────────────────────────
 
-    /**
-     * Uses d3.timer which ticks every animation frame.  Each node has a
-     * unique phase & period so they pulse independently.
-     */
     let pulseTimer: d3.Timer | null = null;
 
     const pulseStartDelay = setTimeout(() => {
       pulseTimer = d3.timer((elapsed: number) => {
         nodeGroups.each(function (d) {
-          // Hands off to hover scale — don't fight it
           if (hoveredIds.has(d.event.id)) return;
-
-          const scale =
-            1.0 +
-            0.15 * Math.sin(d.pulsePhase + (elapsed / d.pulsePeriod) * Math.PI * 2);
-
-          d3.select(this)
-            .select('circle')
-            .attr('transform', `scale(${scale.toFixed(5)})`);
+          const scale = 1.0 + 0.15 * Math.sin(d.pulsePhase + (elapsed / d.pulsePeriod) * Math.PI * 2);
+          d3.select(this).select('circle').attr('transform', `scale(${scale.toFixed(5)})`);
         });
       });
-    }, BURST_MS + 50); // 50 ms buffer after burst
+    }, BURST_MS + 50);
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
 
@@ -375,15 +282,12 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
     };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [events, year, dims]); // onSelectRef intentionally omitted — it's always current
+  }, [events, year, renderKey]); // onSelectRef intentionally omitted — always current
 
   // ── JSX ───────────────────────────────────────────────────────────────────
 
   return (
-    <div
-      ref={containerRef}
-      style={{ position: 'relative', width: '100%', height: '100%' }}
-    >
+    <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100%' }}>
       <svg
         ref={svgRef}
         style={{ display: 'block', width: '100%', height: '100%' }}

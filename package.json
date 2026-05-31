@@ -7,14 +7,14 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "doctor": "npx react-doctor@latest"
   },
   "dependencies": {
     "axios": "^1.16.1",
     "d3": "^7.9.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6",
-    "react-router-dom": "^7.16.0"
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

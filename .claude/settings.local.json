@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "PowerShell(Set-Location C:\\\\Users\\\\GoDAM\\\\Documents\\\\chronograph; foreach \\($d in @\\('src/components','src/hooks','src/api','src/utils','src/constants'\\)\\) { New-Item -ItemType File -Force \"$d/.gitkeep\" | Out-Null }; Write-Host \"gitkeep files created\")",
-      "PowerShell(New-Item -ItemType Directory -Force C:\\\\Users\\\\GoDAM\\\\Documents\\\\chronograph\\\\api)"
+      "PowerShell(New-Item -ItemType Directory -Force C:\\\\Users\\\\GoDAM\\\\Documents\\\\chronograph\\\\api)",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\GoDAM\\\\Documents\\\\chronograph\"; $out = & git log --oneline -3 2>&1; [string]::Join\\(\"`n\", $out\\))"
     ]
   }
 }

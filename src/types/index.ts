@@ -39,3 +39,21 @@ export interface YearData {
   events: HistoricalEvent[];
   fetchedAt: number;
 }
+
+// ── Graph component types ─────────────────────────────────────────────────────
+
+export interface GraphProps {
+  events:        HistoricalEvent[];
+  year:          number;
+  onEventSelect: (event: HistoricalEvent) => void;
+}
+
+/** Internal datum attached to every D3 event node. */
+export interface NodeDatum {
+  event:        HistoricalEvent;
+  finalX:       number;
+  finalY:       number;
+  color:        string;
+  pulsePhase:   number;
+  pulsePeriod:  number;
+}
