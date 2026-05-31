@@ -2,6 +2,7 @@ import { useState } from 'react'
 import reactLogo from './assets/react.svg'
 import viteLogo from './assets/vite.svg'
 import heroImg from './assets/hero.png'
+import SpaceBackground from './components/SpaceBackground'
 import './App.css'
 
 function App() {
@@ -9,6 +10,7 @@ function App() {
 
   return (
     <>
+      <SpaceBackground />
       <section id="center">
         <div className="hero">
           <img src={heroImg} className="base" width="170" height="179" alt="" />
