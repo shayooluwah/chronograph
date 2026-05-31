@@ -1,73 +1,95 @@
-# React + TypeScript + Vite
+# ChronoGraph
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**Interactive historical graph explorer powered by Wikidata.**
 
-Currently, two official plugins are available:
+Enter any year and ChronoGraph fetches real historical data — births, deaths, events, and organizations — then renders them as an animated radial graph against a living star-field background. Click any node to read its full Wikidata entry and jump to Wikipedia.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+---
 
-## React Compiler
+## Tech stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Layer | Technology |
+|---|---|
+| UI framework | React 19 + TypeScript |
+| Graph / animation | D3.js v7 |
+| Styling | Tailwind CSS v3 |
+| Build tool | Vite |
+| API / backend | Vercel Serverless Functions (Node.js) |
+| Data source | Wikidata SPARQL endpoint |
+| HTTP client | Axios |
+| Routing (future) | React Router DOM |
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Features
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- 🌌 Canvas-based animated star-field background (200 twinkling particles)
+- 🔭 Radial D3 graph with category-coloured nodes and burst entry animation
+- 🗓️ Supports any year including BCE (e.g. `-44` for 44 BCE)
+- 🔍 Per-category filter pills (Births, Deaths, Events, Organizations, Publications, Wars, Discoveries)
+- 📖 Slide-in event detail panel with Wikipedia deep-link
+- 📱 Responsive — bottom-sheet panel and compact layout on mobile
+- ⚡ 24-hour CDN cache on the serverless function; no auth required
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+---
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Run locally
+
+```bash
+# 1. Install dependencies
+npm install
+
+# 2. Start the Vite dev server
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The app is served at **http://localhost:5173**.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+> **Note — API in development:**
+> The serverless function at `api/year.js` runs on Vercel's edge infrastructure.
+> For local development, install the Vercel CLI and run `vercel dev` instead of
+> `npm run dev` if you want live SPARQL calls. `npm run dev` alone still works —
+> the Vite proxy will 404 on `/api/*`, but you can mock responses or point the
+> client at a deployed preview URL by setting `VITE_API_BASE` in a `.env.local` file.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+---
+
+## No API keys required
+
+ChronoGraph queries the public [Wikidata SPARQL endpoint](https://query.wikidata.org/) directly — no registration, tokens, or billing needed for the MVP.
+
+---
+
+## Project structure
+
 ```
+chronograph/
+├── api/
+│   └── year.js          # Vercel serverless function (SPARQL -> HistoricalEvent[])
+├── src/
+│   ├── api/
+│   │   └── yearApi.ts   # Axios client wrapper
+│   ├── components/
+│   │   ├── SpaceBackground.tsx  # Canvas starfield
+│   │   ├── Graph.tsx            # D3 radial graph
+│   │   ├── SearchBar.tsx        # Landing/graph mode morphing search
+│   │   ├── CategoryFilter.tsx   # Toggle pills
+│   │   └── EventPanel.tsx       # Slide-in detail panel
+│   ├── types/
+│   │   └── index.ts     # HistoricalEvent, GraphNode, GraphLink, YearData
+│   ├── App.tsx
+│   └── main.tsx
+├── vercel.json           # API rewrite rules
+└── vite.config.ts
+```
+
+---
+
+## Deploy to Vercel
+
+```bash
+npm i -g vercel
+vercel
+```
+
+Vercel auto-detects the `api/` directory and deploys `year.js` as a serverless function. No additional configuration required.
