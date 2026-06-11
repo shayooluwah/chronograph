@@ -71,5 +71,7 @@ export interface YearMapProps {
   links:        YearMapLink[];
   /** Years the user has already opened — rendered with a glowing ring. */
   visitedYears: Set<number>;
+  /** The most recently visited year; triggers node expansion on return. */
+  lastVisitedYear: number | null;
   onYearSelect: (year: number) => void;
 }

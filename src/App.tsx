@@ -69,54 +69,9 @@ const SEED_LINKS: YearMapLink[] = SEED_YEARS.slice(1).map((year, i) => ({
   target: year,
 }));
 
-/** Hard cap on map nodes to keep the force simulation cheap. */
-const MAX_MAP_NODES = 30;
-
 /** The existing map year chronologically closest to `year`. */
 function nearestYear(years: number[], year: number): number {
   return years.reduce((best, y) => (Math.abs(y - year) < Math.abs(best - year) ? y : best));
-}
-
-/**
- * Years referenced by the visited year's events (from the /api/year payload
- * already in state): lifespans, founding dates etc. mentioned in titles and
- * descriptions. Most-mentioned first, ties broken by proximity to the visit.
- */
-function extractRelatedYears(events: HistoricalEvent[], visitedYear: number): number[] {
-  const counts = new Map<number, number>();
-  for (const ev of events) {
-    for (const match of `${ev.title} ${ev.description}`.matchAll(/\b\d{3,4}\b/g)) {
-      const y = parseInt(match[0], 10);
-      if (y === visitedYear) continue;
-      if (y < 100 || y > 2100) continue;                // not a plausible year mention
-      if (Math.abs(y - visitedYear) > 200) continue;    // keep the map neighbourhood local
-      counts.set(y, (counts.get(y) ?? 0) + 1);
-    }
-  }
-  const ranked = Array.from(counts.entries());
-  ranked.sort((a, b) => b[1] - a[1] || Math.abs(a[0] - visitedYear) - Math.abs(b[0] - visitedYear));
-  return ranked.map(([y]) => y);
-}
-
-/** Grow the map around a just-visited year: up to 3 related (or nearby) years,
- *  each linked back to the visited node, respecting the node cap. */
-function expandAroundYear(
-  years:       number[],
-  links:       YearMapLink[],
-  visitedYear: number,
-  events:      HistoricalEvent[],
-): { mapYears: number[]; mapLinks: YearMapLink[] } {
-  let related = extractRelatedYears(events, visitedYear).filter(y => !years.includes(y));
-  if (related.length === 0) {
-    related = [visitedYear - 10, visitedYear + 10, visitedYear + 25]
-      .filter(y => y !== 0 && !years.includes(y)); // year 0 does not exist
-  }
-  related = related.slice(0, Math.min(3, Math.max(0, MAX_MAP_NODES - years.length)));
-  if (related.length === 0) return { mapYears: years, mapLinks: links };
-  return {
-    mapYears: [...years, ...related],
-    mapLinks: [...links, ...related.map(y => ({ source: visitedYear, target: y }))],
-  };
 }
 
 type AppView = 'yearMap' | 'yearDetail';
@@ -170,20 +125,10 @@ function appReducer(state: AppState, action: AppAction): AppState {
     }
     case 'SEARCH_ERROR':
       return { ...state, pendingYear: null, loading: false, error: 'Could not load data for this year. Try another.' };
-    case 'SHOW_MAP': {
-      // Returning to the map grows it: related years sprout from the visited node
-      const expanded = state.selectedYear !== null
-        ? expandAroundYear(state.mapYears, state.mapLinks, state.selectedYear, state.events)
-        : { mapYears: state.mapYears, mapLinks: state.mapLinks };
-      return {
-        ...state,
-        ...expanded,
-        view:          'yearMap',
-        selectedYear:  null,
-        selectedEvent: null,
-        error:         null,
-      };
-    }
+    case 'SHOW_MAP':
+      // Node expansion around the visited year happens inside YearMap itself
+      // (driven by the lastVisitedYear prop), directly in the live simulation.
+      return { ...state, view: 'yearMap', selectedYear: null, selectedEvent: null, error: null };
     case 'SELECT_EVENT':
       return { ...state, selectedEvent: action.event };
     case 'SET_CATEGORIES':
@@ -217,6 +162,10 @@ export default function App() {
   const isDetail       = view === 'yearDetail' && selectedYear !== null;
   const filteredEvents = events.filter(e => activeCategories.has(e.category));
 
+  // Sets iterate in insertion order, so the last entry is the most recent visit
+  let lastVisitedYear: number | null = null;
+  for (const y of visitedYears) lastVisitedYear = y;
+
   async function handleSearch(year: number) {
     if (loading) return;
     dispatch({ type: 'SEARCH_START', year });
@@ -243,6 +192,7 @@ export default function App() {
             years={mapYears}
             links={mapLinks}
             visitedYears={visitedYears}
+            lastVisitedYear={lastVisitedYear}
             onYearSelect={handleSearch}
           />
         </>

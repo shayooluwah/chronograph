@@ -8,6 +8,18 @@ import type { YearMapProps } from '../types';
 const NODE_COLOR    = '#9ab0ff';
 const VISITED_COLOR = '#ffd9a0'; // warm gold — marks years already explored
 
+/** Hard cap on simulation nodes to keep the force layout cheap. */
+const MAX_NODES = 30;
+
+/** Offsets for years grown out of a visited node — deliberately not round
+ *  numbers so the expansion doesn't feel artificial. */
+const EXPANSION_OFFSETS = [-12, 11, 27];
+
+/** Years grown client-side from visited nodes (year → parent year).
+ *  Module scope on purpose: YearMap unmounts while a yearDetail is open, so
+ *  per-instance state would lose un-clicked expansions on every visit. */
+const EXPANDED_YEARS = new Map<number, number>();
+
 interface YearNode extends d3.SimulationNodeDatum {
   id:          number;  // the year itself
   isNew:       boolean; // appeared this render — gets the grow-out entry animation
@@ -115,11 +127,146 @@ function buildSimLinks(sortedYears: number[], links: YearMapProps['links']): Yea
   return simLinks;
 }
 
+/** Merge client-grown years (EXPANDED_YEARS) into the prop data so expansions
+ *  survive full D3 rebuilds and YearMap remounts — props only gain a grown
+ *  year once the user actually visits it. */
+function mergeExpansions(years: number[], links: YearMapProps['links']) {
+  const mergedYears = [...years];
+  const mergedLinks = [...links];
+  const present     = new Set(years);
+  for (const [year, parent] of EXPANDED_YEARS) {
+    if (!present.has(year) && mergedYears.length < MAX_NODES) {
+      present.add(year);
+      mergedYears.push(year);
+      mergedLinks.push({ source: parent, target: year });
+    }
+  }
+  return { mergedYears, mergedLinks };
+}
+
+/** Expansion candidates for a visited year: fixed offsets, skipping year 0
+ *  (does not exist) and duplicates, respecting the node cap. */
+function pickExpansionYears(visitedYear: number, current: YearNode[]): number[] {
+  const existing = new Set<number>();
+  for (const n of current) existing.add(n.id);
+  const fresh: number[] = [];
+  for (const offset of EXPANSION_OFFSETS) {
+    const y = visitedYear + offset;
+    if (y === 0 || existing.has(y)) continue;
+    if (current.length + fresh.length >= MAX_NODES) break;
+    fresh.push(y);
+  }
+  return fresh;
+}
+
+/** Fresh simulation datums spawned at (px, py), with a little jitter so
+ *  identical start positions don't degenerate the forces. */
+function spawnNodesAt(years: number[], px: number, py: number): YearNode[] {
+  return years.map(y => ({
+    id:          y,
+    isNew:       true,
+    x:           px + (Math.random() - 0.5) * 8,
+    y:           py + (Math.random() - 0.5) * 8,
+    driftPhase:  Math.random() * Math.PI * 2,
+    driftPeriod: (5 + Math.random() * 3) * 1000,
+    driftAmp:    4 + Math.random() * 5,
+  }));
+}
+
+interface NodeStyle {
+  RX:        number;
+  RY:        number;
+  isMobile:  boolean;
+  isVisited: (d: YearNode) => boolean;
+  baseFill:  (d: YearNode) => string;
+}
+
+/** Appends the ring / body / label structure to entered node groups. */
+function decorateNodeEnter(
+  enter: d3.Selection<SVGGElement, YearNode, SVGGElement, unknown>,
+  { RX, RY, isMobile, isVisited, baseFill }: NodeStyle,
+): void {
+  // Visited marker: a soft outer ring drawn behind the main ellipse
+  enter.filter(isVisited).append('ellipse')
+    .attr('class',        'visited-ring')
+    .attr('rx',           RX + 7)
+    .attr('ry',           RY + 7)
+    .attr('fill',         'none')
+    .attr('stroke',       hexToRgba(VISITED_COLOR, 0.55))
+    .attr('stroke-width', 1.5)
+    .attr('filter',       'url(#glow-yearmap-visited)');
+
+  enter.append('ellipse')
+    .attr('class',        'node-body')
+    .attr('rx',           RX)
+    .attr('ry',           RY)
+    .attr('fill',         baseFill)
+    .attr('stroke',       d => hexToRgba(isVisited(d) ? VISITED_COLOR : NODE_COLOR, 0.8))
+    .attr('stroke-width', 1.5)
+    .attr('filter',       d => isVisited(d) ? 'url(#glow-yearmap-visited)' : 'url(#glow-yearmap)');
+
+  enter.append('text')
+    .attr('text-anchor',       'middle')
+    .attr('dominant-baseline', 'central')
+    .attr('fill',              '#ffffff')
+    .attr('font-weight',       600)
+    .attr('font-size',         isMobile ? '12px' : '14px')
+    .attr('font-family',       'system-ui, sans-serif')
+    .attr('letter-spacing',    '0.5')
+    .attr('pointer-events',    'none')
+    .text(d => String(d.id));
+}
+
+/** Stable identity for a link whether its ends are still raw year numbers or
+ *  already resolved to node objects by the force simulation. */
+const endId   = (end: YearLink['source']) => (typeof end === 'object' ? end.id : end);
+const linkKey = (l: YearLink) => `${endId(l.source)}→${endId(l.target)}`;
+
+/** Expansion entry: scale 0 / opacity 0 → full over 600ms, the same
+ *  easeBackOut pop as Graph.tsx's burst entry. */
+function animateGrowth(enter: d3.Selection<SVGGElement, YearNode, SVGGElement, unknown>): void {
+  enter
+    .attr('opacity', 0)
+    .transition().duration(600).ease(d3.easeBackOut)
+    .attr('opacity', 1);
+  enter.select('ellipse.node-body')
+    .attr('transform', 'scale(0)')
+    .transition().duration(600).ease(d3.easeBackOut)
+    .attr('transform', 'scale(1)');
+}
+
+/** Hover handlers shared by initial and expanded nodes. `isZooming` defers
+ *  to the zoom-exit animation, which owns the ellipse while it plays. */
+function makeHoverHandlers(style: NodeStyle, isZooming: () => boolean) {
+  return {
+    onPointerEnter(this: SVGGElement, _: unknown, d: YearNode) {
+      if (isZooming()) return;
+      d3.select(this).select('ellipse.node-body')
+        .interrupt()
+        .transition().duration(130).ease(d3.easeCubicOut)
+        .attr('transform', 'scale(1.15)')
+        .attr('fill', hexToRgba(style.isVisited(d) ? VISITED_COLOR : NODE_COLOR, 0.34));
+    },
+    onPointerLeave(this: SVGGElement, _: unknown, d: YearNode) {
+      if (isZooming()) return;
+      d3.select(this).select('ellipse.node-body')
+        .interrupt()
+        .transition().duration(130).ease(d3.easeCubicOut)
+        .attr('transform', 'scale(1)')
+        .attr('fill', style.baseFill(d));
+    },
+  };
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function YearMap({ years, links, visitedYears, onYearSelect }: YearMapProps) {
+export default function YearMap({ years, links, visitedYears, lastVisitedYear, onYearSelect }: YearMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef       = useRef<SVGSVGElement>(null);
+
+  /** Expansion entry point into the current D3 scene; (re)assigned by the
+   *  render effect so it always closes over the live simulation. */
+  const expandRef = useRef<((visitedYear: number) => void) | null>(null);
 
   /** Last simulated position per year, persisted across D3 re-renders so
    *  existing nodes stay put and only genuinely new nodes animate in.
@@ -187,77 +334,84 @@ export default function YearMap({ years, links, visitedYears, onYearSelect }: Ye
 
     // ── Nodes & links ──────────────────────────────────────────────────────────
 
-    const sortedYears   = years.toSorted((a, b) => a - b);
+    const { mergedYears, mergedLinks } = mergeExpansions(years, links);
+
+    const sortedYears   = mergedYears.toSorted((a, b) => a - b);
     const stored        = positionsRef.current!; // initialised during render, never null here
     const isFirstRender = stored.size === 0;
 
-    const nodes    = buildNodes(sortedYears, links, stored, w, h, cx, cy);
-    const simLinks = buildSimLinks(sortedYears, links);
+    // Mutable graph data: the expansion path appends to these and re-joins,
+    // so the simulation keeps running on the same arrays it was given.
+    let allNodes = buildNodes(sortedYears, mergedLinks, stored, w, h, cx, cy);
+    let allLinks = buildSimLinks(sortedYears, mergedLinks);
 
-    const linkSels = scene.append('g').attr('class', 'links')
-      .selectAll<SVGLineElement, YearLink>('line')
-      .data(simLinks)
-      .join('line')
-        .attr('stroke',       'rgba(154,176,255,0.22)')
-        .attr('stroke-width', 1.2);
-
-    const nodeGroups = scene.append('g').attr('class', 'nodes')
-      .selectAll<SVGGElement, YearNode>('g.year-node')
-      .data(nodes, d => d.id)
-      .join('g')
-        .attr('class',  'year-node')
-        .style('cursor', 'pointer')
-        .attr('opacity', d => (isFirstRender || d.isNew) ? 0 : 1);
+    const linkLayer = scene.append('g').attr('class', 'links');
+    const nodeLayer = scene.append('g').attr('class', 'nodes');
 
     const isVisited = (d: YearNode) => visitedYears.has(d.id);
     const baseFill  = (d: YearNode) =>
       hexToRgba(isVisited(d) ? VISITED_COLOR : NODE_COLOR, isVisited(d) ? 0.22 : 0.16);
+    const nodeStyle: NodeStyle = { RX, RY, isMobile, isVisited, baseFill };
 
-    // Visited marker: a soft outer ring drawn behind the main ellipse
-    nodeGroups.filter(isVisited).append('ellipse')
-      .attr('class',        'visited-ring')
-      .attr('rx',           RX + 7)
-      .attr('ry',           RY + 7)
-      .attr('fill',         'none')
-      .attr('stroke',       hexToRgba(VISITED_COLOR, 0.55))
-      .attr('stroke-width', 1.5)
-      .attr('filter',       'url(#glow-yearmap-visited)');
+    // Set while the zoom-into-node exit animation plays; blocks hover/clicks.
+    let zooming = false;
+    let restoreTimeout: number | undefined;
+    const { onPointerEnter, onPointerLeave } = makeHoverHandlers(nodeStyle, () => zooming);
 
-    nodeGroups.append('ellipse')
-      .attr('class',        'node-body')
-      .attr('rx',           RX)
-      .attr('ry',           RY)
-      .attr('fill',         baseFill)
-      .attr('stroke',       d => hexToRgba(isVisited(d) ? VISITED_COLOR : NODE_COLOR, 0.8))
-      .attr('stroke-width', 1.5)
-      .attr('filter',       d => isVisited(d) ? 'url(#glow-yearmap-visited)' : 'url(#glow-yearmap)');
+    // Reassigned by the join helpers whenever nodes are added, so the event
+    // handlers and the drift timer below always operate on the full set.
+    let linkSel: d3.Selection<SVGLineElement, YearLink, SVGGElement, unknown>;
+    let nodeSel: d3.Selection<SVGGElement, YearNode, SVGGElement, unknown>;
 
-    nodeGroups.append('text')
-      .attr('text-anchor',       'middle')
-      .attr('dominant-baseline', 'central')
-      .attr('fill',              '#ffffff')
-      .attr('font-weight',       600)
-      .attr('font-size',         isMobile ? '12px' : '14px')
-      .attr('font-family',       'system-ui, sans-serif')
-      .attr('letter-spacing',    '0.5')
-      .attr('pointer-events',    'none')
-      .text(d => String(d.id));
+    /** Data-join lines for `allLinks`; returns the enter selection. */
+    function joinLinks() {
+      const join  = linkLayer.selectAll<SVGLineElement, YearLink>('line').data(allLinks, linkKey);
+      const enter = join.enter().append('line')
+        .attr('stroke',       'rgba(154,176,255,0.22)')
+        .attr('stroke-width', 1.2);
+      linkSel = join.merge(enter);
+      return enter;
+    }
+
+    /** Data-join groups for `allNodes`, decorating and wiring new ones;
+     *  returns the enter selection. */
+    function joinNodes() {
+      const join  = nodeLayer.selectAll<SVGGElement, YearNode>('g.year-node').data(allNodes, d => d.id);
+      const enter = join.enter().append('g')
+        .attr('class',  'year-node')
+        .style('cursor', 'pointer');
+
+      decorateNodeEnter(enter, nodeStyle);
+
+      enter
+        .on('pointerenter', onPointerEnter)
+        .on('pointerleave', onPointerLeave)
+        .on('click',        onNodeClick);
+
+      nodeSel = join.merge(enter);
+      return enter;
+    }
+
+    joinLinks();
+    const enterNodes = joinNodes();
 
     // Entry animation: first render staggers everything in; afterwards only
     // new nodes appear, growing out of their spawn point as the forces push them.
-    nodeGroups.filter(d => isFirstRender || d.isNew)
+    enterNodes.attr('opacity', d => (isFirstRender || d.isNew) ? 0 : 1);
+
+    enterNodes.filter(d => isFirstRender || d.isNew)
       .transition().duration(500).delay((_, i) => i * 60).ease(d3.easeCubicOut)
       .attr('opacity', 1);
 
-    nodeGroups.filter(d => d.isNew).select('ellipse.node-body')
+    enterNodes.filter(d => d.isNew).select('ellipse.node-body')
       .attr('transform', 'scale(0.2)')
       .transition().duration(550).ease(d3.easeBackOut)
       .attr('transform', 'scale(1)');
 
     // ── Force simulation ───────────────────────────────────────────────────────
 
-    const simulation = d3.forceSimulation<YearNode>(nodes)
-      .force('link', d3.forceLink<YearNode, YearLink>(simLinks)
+    const simulation = d3.forceSimulation<YearNode>(allNodes)
+      .force('link', d3.forceLink<YearNode, YearLink>(allLinks)
         .id(d => d.id)
         .distance(isMobile ? 110 : 170)
         .strength(0.4))
@@ -271,73 +425,77 @@ export default function YearMap({ years, links, visitedYears, onYearSelect }: Ye
 
     // ── Interactions ───────────────────────────────────────────────────────────
 
-    // Set while the zoom-into-node exit animation plays; blocks hover/clicks.
-    let zooming = false;
-    let restoreTimeout: number | undefined;
+    function onNodeClick(this: SVGGElement, ev: Event, d: YearNode) {
+      (ev as MouseEvent).stopPropagation();
+      if (zooming) return;
+      zooming = true;
 
-    nodeGroups
-      .on('pointerenter', function (_, d) {
-        if (zooming) return;
-        d3.select(this).select('ellipse.node-body')
-          .interrupt()
-          .transition().duration(130).ease(d3.easeCubicOut)
-          .attr('transform', 'scale(1.15)')
-          .attr('fill', hexToRgba(isVisited(d) ? VISITED_COLOR : NODE_COLOR, 0.34));
-      })
-      .on('pointerleave', function (_, d) {
-        if (zooming) return;
-        d3.select(this).select('ellipse.node-body')
-          .interrupt()
-          .transition().duration(130).ease(d3.easeCubicOut)
-          .attr('transform', 'scale(1)')
-          .attr('fill', baseFill(d));
-      })
-      .on('click', function (ev, d) {
-        (ev as MouseEvent).stopPropagation();
-        if (zooming) return;
-        zooming = true;
+      // Zoom-into-node exit: the chosen node swells while everything else
+      // fades, then navigation fires and the loading overlay takes over.
+      const ZOOM_MS = 450;
+      const chosen  = d3.select(this);
+      chosen.raise();
 
-        // Zoom-into-node exit: the chosen node swells while everything else
-        // fades, then navigation fires and the loading overlay takes over.
-        const ZOOM_MS = 450;
-        const chosen  = d3.select(this);
-        chosen.raise();
+      nodeSel.filter(nd => nd.id !== d.id)
+        .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
+        .attr('opacity', 0);
+      linkSel
+        .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
+        .attr('opacity', 0);
 
-        nodeGroups.filter(nd => nd.id !== d.id)
-          .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
-          .attr('opacity', 0);
-        linkSels
-          .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
-          .attr('opacity', 0);
+      chosen.select('ellipse.node-body')
+        .interrupt()
+        .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
+        .attr('transform', 'scale(3)');
+      chosen
+        .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
+        .attr('opacity', 0)
+        .on('end', () => {
+          onSelectRef.current(d.id);
+          // If navigation succeeds the map unmounts and this never shows.
+          // If the fetch fails the view stays on the map, so bring it back.
+          restoreTimeout = window.setTimeout(() => {
+            zooming = false;
+            nodeSel.transition().duration(400).attr('opacity', 1);
+            linkSel.transition().duration(400).attr('opacity', 1);
+            chosen.select('ellipse.node-body')
+              .transition().duration(400)
+              .attr('transform', 'scale(1)');
+          }, 1200);
+        });
+    }
 
-        chosen.select('ellipse.node-body')
-          .interrupt()
-          .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
-          .attr('transform', 'scale(3)');
-        chosen
-          .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
-          .attr('opacity', 0)
-          .on('end', () => {
-            onSelectRef.current(d.id);
-            // If navigation succeeds the map unmounts and this never shows.
-            // If the fetch fails the view stays on the map, so bring it back.
-            restoreTimeout = window.setTimeout(() => {
-              zooming = false;
-              nodeGroups.transition().duration(400).attr('opacity', 1);
-              linkSels.transition().duration(400).attr('opacity', 1);
-              chosen.select('ellipse.node-body')
-                .transition().duration(400)
-                .attr('transform', 'scale(1)');
-            }, 1200);
-          });
-      });
+    // ── Dynamic expansion: grow new years out of a just-visited node ───────────
+
+    expandRef.current = (visitedYear: number) => {
+      const parent = allNodes.find(n => n.id === visitedYear);
+      if (!parent) return;
+
+      const fresh = pickExpansionYears(visitedYear, allNodes);
+      if (fresh.length === 0) return;
+
+      // Spawn at the visited node's current position so they grow out of it
+      const newNodes = spawnNodesAt(fresh, parent.x ?? cx, parent.y ?? cy);
+
+      allNodes = allNodes.concat(newNodes);
+      allLinks = allLinks.concat(fresh.map(y => ({ source: visitedYear, target: y })));
+      for (const y of fresh) EXPANDED_YEARS.set(y, visitedYear);
+
+      joinLinks();
+      animateGrowth(joinNodes());
+
+      // Feed the running simulation — no rebuild, just a gentle re-settle
+      simulation.nodes(allNodes);
+      (simulation.force('link') as d3.ForceLink<YearNode, YearLink>).links(allLinks);
+      simulation.alpha(0.3).restart();
+    };
 
     // ── Render loop: simulation position + sine-wave drift ─────────────────────
     // One d3.timer owns all transforms (same pattern as Graph.tsx's pulse);
     // the simulation only updates d.x / d.y, the timer composes the drift on top.
 
     const driftTimer = d3.timer((elapsed: number) => {
-      nodeGroups.attr('transform', d => {
+      nodeSel.attr('transform', d => {
         const t  = (elapsed / d.driftPeriod) * Math.PI * 2;
         const dx = d.driftAmp * Math.sin(d.driftPhase + t);
         const dy = d.driftAmp * Math.cos(d.driftPhase * 1.7 + t * 1.23);
@@ -348,7 +506,7 @@ export default function YearMap({ years, links, visitedYears, onYearSelect }: Ye
         return `translate(${d.renderX.toFixed(2)},${d.renderY.toFixed(2)})`;
       });
 
-      linkSels
+      linkSel
         .attr('x1', d => (d.source as YearNode).renderX ?? cx)
         .attr('y1', d => (d.source as YearNode).renderY ?? cy)
         .attr('x2', d => (d.target as YearNode).renderX ?? cx)
@@ -358,6 +516,7 @@ export default function YearMap({ years, links, visitedYears, onYearSelect }: Ye
     // ── Cleanup ────────────────────────────────────────────────────────────────
 
     return () => {
+      expandRef.current = null;
       clearTimeout(restoreTimeout);
       driftTimer.stop();
       simulation.stop();
@@ -365,6 +524,17 @@ export default function YearMap({ years, links, visitedYears, onYearSelect }: Ye
     };
 
   }, [years, links, visitedYears, renderKey]); // onSelectRef intentionally omitted — always current
+
+  // ── Expansion trigger ───────────────────────────────────────────────────────
+  // Runs when the map mounts after a visit (and whenever a different year is
+  // visited). Deferred slightly so the growth animation plays against the
+  // final scene — on mount the dims effect bumps renderKey, which rebuilds
+  // the D3 scene once more right after the first build.
+  useEffect(() => {
+    if (lastVisitedYear === null) return;
+    const t = window.setTimeout(() => expandRef.current?.(lastVisitedYear), 80);
+    return () => clearTimeout(t);
+  }, [lastVisitedYear]);
 
   // ── JSX ─────────────────────────────────────────────────────────────────────
 

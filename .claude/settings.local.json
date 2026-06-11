@@ -3,7 +3,11 @@
     "allow": [
       "PowerShell(Set-Location C:\\\\Users\\\\GoDAM\\\\Documents\\\\chronograph; foreach \\($d in @\\('src/components','src/hooks','src/api','src/utils','src/constants'\\)\\) { New-Item -ItemType File -Force \"$d/.gitkeep\" | Out-Null }; Write-Host \"gitkeep files created\")",
       "PowerShell(New-Item -ItemType Directory -Force C:\\\\Users\\\\GoDAM\\\\Documents\\\\chronograph\\\\api)",
-      "PowerShell(Set-Location \"C:\\\\Users\\\\GoDAM\\\\Documents\\\\chronograph\"; $out = & git log --oneline -3 2>&1; [string]::Join\\(\"`n\", $out\\))"
+      "PowerShell(Set-Location \"C:\\\\Users\\\\GoDAM\\\\Documents\\\\chronograph\"; $out = & git log --oneline -3 2>&1; [string]::Join\\(\"`n\", $out\\))",
+      "PowerShell(curl.exe -s -w \"`nHTTP_STATUS:%{http_code} TIME:%{time_total}s\" \"https://chronograph-coral.vercel.app/api/year?year=1945\" --max-time 60 -o api_response.json; Get-Content api_response.json -TotalCount 1 | ForEach-Object { $_.Substring\\(0, [Math]::Min\\(500, $_.Length\\)\\) })",
+      "PowerShell(curl.exe -s -w \"STATUS:%{http_code} TIME:%{time_total}s`n\" -o $null \"https://www.wikidata.org/wiki/Special:EntityData/Q42.json\" --max-time 20; $q2 = [System.Uri]::EscapeDataString\\(\"SELECT ?x WHERE { BIND\\(1 AS ?x\\) }\"\\); curl.exe -s -w \"`nSPARQL_STATUS:%{http_code} TIME:%{time_total}s\" -H \"Accept: application/sparql-results+json\" -H \"User-Agent: Chronograph/1.0 \\(test\\)\" \"https://query.wikidata.org/sparql?query=$q2&format=json\" --max-time 30)",
+      "mcp__Claude_Preview__preview_start",
+      "mcp__Claude_in_Chrome__tabs_context_mcp"
     ]
   }
 }
