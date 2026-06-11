@@ -12,6 +12,8 @@ import type { HistoricalEvent } from '../types';
 export async function fetchYearEvents(year: number): Promise<HistoricalEvent[]> {
   const { data } = await axios.get<HistoricalEvent[]>('/api/year', {
     params: { year },
+    // Surface an error instead of leaving the loading overlay up indefinitely
+    timeout: 30_000,
   });
 
   return data;
