@@ -57,3 +57,19 @@ export interface NodeDatum {
   pulsePhase:   number;
   pulsePeriod:  number;
 }
+
+// ── YearMap component types ───────────────────────────────────────────────────
+
+/** A connection between two year nodes on the map, by year value. */
+export interface YearMapLink {
+  source: number;
+  target: number;
+}
+
+export interface YearMapProps {
+  years:        number[];
+  links:        YearMapLink[];
+  /** Years the user has already opened — rendered with a glowing ring. */
+  visitedYears: Set<number>;
+  onYearSelect: (year: number) => void;
+}

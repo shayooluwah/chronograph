@@ -3,7 +3,7 @@ import { useState, useRef } from 'react';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface SearchBarProps {
-  mode:         'landing' | 'graph';
+  mode:         'landing' | 'graph' | 'map';
   currentYear?: number;
   onSearch:     (year: number) => void;
 }
@@ -47,8 +47,8 @@ export default function SearchBar({ mode, currentYear, onSearch }: SearchBarProp
    */
   const [raw,   setRaw]   = useState(currentYear !== undefined ? String(currentYear) : '');
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const isGraph  = mode === 'graph';
+  const inputRef  = useRef<HTMLInputElement>(null);
+  const isCompact = mode !== 'landing'; // graph and map modes collapse the hero
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -87,7 +87,7 @@ export default function SearchBar({ mode, currentYear, onSearch }: SearchBarProp
     <div className="searchbar" data-mode={mode}>
 
       {/* Hero text — collapses via grid-template-rows when in graph mode */}
-      <div className="searchbar-hero-wrapper" aria-hidden={isGraph}>
+      <div className="searchbar-hero-wrapper" aria-hidden={isCompact}>
         <div className="searchbar-hero">
           <h1>ChronoGraph</h1>
           <p>Explore what was happening everywhere in history, one year at a time.</p>
@@ -116,7 +116,7 @@ export default function SearchBar({ mode, currentYear, onSearch }: SearchBarProp
           onClick={handleSubmit}
           aria-label="Search this year"
         >
-          {isGraph ? <ArrowRightIcon /> : 'Explore'}
+          {isCompact ? <ArrowRightIcon /> : 'Explore'}
         </button>
       </div>
 

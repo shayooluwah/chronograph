@@ -65,7 +65,22 @@ body,
   backdrop-filter:         blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 10px 24px;
+  padding: 10px 24px 10px 96px; /* left gap leaves room for the back-to-map button */
+}
+
+/* Compact floating panel, top-right, used on the year-map view */
+.searchbar[data-mode="map"] {
+  top:        16px;
+  left:       auto;
+  right:      16px;
+  width:      min(300px, calc(100vw - 32px));
+  transform:  none;
+  background: rgba(8, 8, 24, 0.80);
+  backdrop-filter:         blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border:        1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  padding:       10px 12px;
 }
 
 /* Hero text wrapper — collapses via grid-template-rows (no layout thrash) */
@@ -79,7 +94,7 @@ body,
     margin-bottom      380ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.searchbar[data-mode="graph"] .searchbar-hero-wrapper {
+.searchbar:not([data-mode="landing"]) .searchbar-hero-wrapper {
   grid-template-rows: 0fr;
   opacity:            0;
   margin-bottom:      0;
@@ -116,7 +131,7 @@ body,
   transition:  gap 380ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.searchbar[data-mode="graph"] .searchbar-input-row {
+.searchbar:not([data-mode="landing"]) .searchbar-input-row {
   gap: 8px;
 }
 
@@ -148,7 +163,7 @@ body,
   border-color: rgba(239, 154, 154, 0.55);
 }
 
-.searchbar[data-mode="graph"] .searchbar-input {
+.searchbar:not([data-mode="landing"]) .searchbar-input {
   font-size:     15px;
   padding:       9px 14px;
   border-radius: 8px;
@@ -182,7 +197,7 @@ body,
   border-color: rgba(255, 255, 255, 0.42);
 }
 
-.searchbar[data-mode="graph"] .searchbar-btn {
+.searchbar:not([data-mode="landing"]) .searchbar-btn {
   font-size:     14px;
   padding:       9px 18px;
   border-radius: 8px;
@@ -635,6 +650,75 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
   right:    0;
   bottom:   0;
   z-index:  10;
+}
+
+/* ── YearMap (entry / navigation view) ───────────────────────────────────────── */
+
+.year-map-container {
+  position: fixed;
+  inset:    0;
+  z-index:  10;
+}
+
+/* Connecting lines: slow-drifting dashes suggest the passage of time.
+   One cycle = the dasharray period (6 + 10 = 16) so the loop is seamless. */
+.year-map-container .links line {
+  stroke-dasharray: 6 10;
+  animation: chrono-dash-flow 3s linear infinite;
+}
+
+@keyframes chrono-dash-flow {
+  to { stroke-dashoffset: -16; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .year-map-container .links line {
+    animation: none;
+  }
+}
+
+/* Small brand mark, top-left of the map view (replaces the landing hero) */
+.chrono-brand {
+  position:       fixed;
+  top:            22px;
+  left:           24px;
+  z-index:        100;
+  margin:         0;
+  font-size:      20px;
+  font-weight:    300;
+  color:          #ffffff;
+  letter-spacing: -0.5px;
+  font-family:    system-ui, sans-serif;
+  text-shadow:    0 0 30px rgba(160, 190, 255, 0.45);
+  pointer-events: none;
+  user-select:    none;
+}
+
+/* Back-to-map button, sits in the left gap of the graph-mode search bar */
+.chrono-back-btn {
+  position:      fixed;
+  top:           12px;
+  left:          16px;
+  z-index:       110;
+  display:       flex;
+  align-items:   center;
+  gap:           6px;
+  background:    rgba(255, 255, 255, 0.07);
+  border:        1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  color:         rgba(255, 255, 255, 0.85);
+  cursor:        pointer;
+  font-family:   system-ui, sans-serif;
+  font-size:     13px;
+  font-weight:   500;
+  padding:       9px 14px;
+  white-space:   nowrap;
+  transition:    background 150ms ease, border-color 150ms ease;
+}
+
+.chrono-back-btn:hover {
+  background:   rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.38);
 }
 
 /* D3 graph tooltip — created imperatively in Graph.tsx */

@@ -152,8 +152,7 @@ export default function SpaceBackground() {
   return (
     <canvas
       ref={canvasRef}
-      // react-doctor-disable-next-line react-doctor/no-aria-hidden-on-focusable
-      // <canvas> has no tabIndex — it is not natively focusable; aria-hidden is correct for decorative content.
+      // react-doctor-disable-next-line react-doctor/no-aria-hidden-on-focusable -- <canvas> has no tabIndex, it is not focusable; aria-hidden is correct for decorative content
       aria-hidden="true"
       style={{
         position: 'fixed',
