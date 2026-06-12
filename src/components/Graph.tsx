@@ -109,6 +109,20 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
     cm.append('feMergeNode').attr('in', 'blurred');
     cm.append('feMergeNode').attr('in', 'SourceGraphic');
 
+    // Drop-shadow for node labels
+    const tsf = defs.append('filter')
+      .attr('id',     'text-shadow-graph')
+      .attr('x',      '-30%')
+      .attr('y',      '-30%')
+      .attr('width',  '160%')
+      .attr('height', '160%');
+    tsf.append('feDropShadow')
+      .attr('dx',            0)
+      .attr('dy',            0)
+      .attr('stdDeviation',  2)
+      .attr('flood-color',   '#000000')
+      .attr('flood-opacity', 0.9);
+
     // Radial gradient: white core → pale blue/lavender halo
     const rg = defs.append('radialGradient').attr('id', 'grad-central');
     rg.append('stop').attr('offset',  '0%').attr('stop-color', '#ffffff').attr('stop-opacity', 1);
@@ -178,6 +192,19 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       .attr('stroke',       d => d.color)
       .attr('stroke-width', 1.5)
       .attr('filter',       d => `url(#glow-${d.event.category})`);
+
+    const truncate = (s: string, max: number) => s.length > max ? s.slice(0, max) + '…' : s;
+
+    nodeGroups.append('text')
+      .attr('text-anchor',       'middle')
+      .attr('y',                 NODE_R + 5)
+      .attr('dominant-baseline', 'hanging')
+      .attr('fill',              '#ffffff')
+      .attr('font-size',         '9px')
+      .attr('font-family',       'system-ui, sans-serif')
+      .attr('pointer-events',    'none')
+      .attr('filter',            'url(#text-shadow-graph)')
+      .text(d => truncate(d.event.title, 20));
 
     // ── Central node ─────────────────────────────────────────────────────────
 

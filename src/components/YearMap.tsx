@@ -73,6 +73,20 @@ function appendGlowFilters(svg: d3.Selection<SVGSVGElement, unknown, null, undef
       merge.append('feMergeNode').attr('in', 'coloredGlow');
       merge.append('feMergeNode').attr('in', 'SourceGraphic');
     });
+
+  const shadow = defs.append('filter')
+    .attr('id',     'text-shadow-yearmap')
+    .attr('x',      '-20%')
+    .attr('y',      '-20%')
+    .attr('width',  '140%')
+    .attr('height', '140%');
+
+  shadow.append('feDropShadow')
+    .attr('dx',            0)
+    .attr('dy',            0)
+    .attr('stdDeviation',  3)
+    .attr('flood-color',   '#000000')
+    .attr('flood-opacity', 0.8);
 }
 
 /** Build simulation nodes. Existing nodes resume their last simulated
@@ -217,6 +231,7 @@ function decorateNodeEnter(
     .attr('font-family',       'system-ui, sans-serif')
     .attr('letter-spacing',    '0.5')
     .attr('pointer-events',    'none')
+    .attr('filter',            'url(#text-shadow-yearmap)')
     .text(d => String(d.id));
 }
 
