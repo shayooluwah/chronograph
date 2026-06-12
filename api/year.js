@@ -53,7 +53,10 @@ SELECT ?item ?itemLabel ?description ?article WHERE {
     } LIMIT 15 }
   OPTIONAL { ?article schema:about ?item; schema:inLanguage "en";
              schema:isPartOf <https://en.wikipedia.org/>. }
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+  SERVICE wikibase:label {
+    bd:serviceParam wikibase:language "en".
+    ?item schema:description ?description.
+  }
 }`;
 }
 
