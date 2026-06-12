@@ -8,7 +8,7 @@ import CategoryFilter  from './components/CategoryFilter';
 import { ALL_CATEGORIES } from './constants/categories';
 import { fetchYearEvents } from './api/yearApi';
 import { enrichEvents } from './services/wikidataEnrichment';
-import type { HistoricalEvent, EventCategory, YearMapLink } from './types';
+import type { HistoricalEvent, EventCategory } from './types';
 import './App.css';
 
 // ── Loading animation data ────────────────────────────────────────────────────
@@ -61,57 +61,12 @@ const KEYFRAMES = `
 
 // ── State / reducer ───────────────────────────────────────────────────────────
 
-/** Years shown on the navigation map before the user has searched anything. */
-const SEED_YEARS = [1776, 1789, 1848, 1914, 1945, 1969, 1989, 2001];
-
-/** Connect each year to its nearest two neighbours by year value. Unlike a
- *  sequential chain this produces local clusters and loops, so the force
- *  layout spreads outward instead of forming a line. */
-function nearestNeighbourLinks(years: number[]): YearMapLink[] {
-  const seen  = new Set<string>();
-  const links: YearMapLink[] = [];
-  for (const year of years) {
-    // Track the two closest other years in a single pass
-    let best:   number | null = null;
-    let second: number | null = null;
-    for (const other of years) {
-      if (other === year) continue;
-      if (best === null || Math.abs(other - year) < Math.abs(best - year)) {
-        second = best;
-        best   = other;
-      } else if (second === null || Math.abs(other - year) < Math.abs(second - year)) {
-        second = other;
-      }
-    }
-    for (const other of [best, second]) {
-      if (other === null) continue;
-      const a   = Math.min(year, other);
-      const b   = Math.max(year, other);
-      const key = `${a}→${b}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        links.push({ source: a, target: b });
-      }
-    }
-  }
-  return links;
-}
-
-const SEED_LINKS: YearMapLink[] = nearestNeighbourLinks(SEED_YEARS);
-
-/** The existing map year chronologically closest to `year`. */
-function nearestYear(years: number[], year: number): number {
-  return years.reduce((best, y) => (Math.abs(y - year) < Math.abs(best - year) ? y : best));
-}
-
 type AppView = 'yearMap' | 'yearDetail';
 
 interface AppState {
   view:             AppView;
   selectedYear:     number | null;
   pendingYear:      number | null;
-  mapYears:         number[];
-  mapLinks:         YearMapLink[];
   visitedYears:     Set<number>;
   events:           HistoricalEvent[];
   loading:          boolean;
@@ -133,7 +88,6 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SEARCH_START':
       return { ...state, pendingYear: action.year, loading: true, error: null, selectedEvent: null };
     case 'SEARCH_SUCCESS': {
-      const isNewYear = !state.mapYears.includes(action.year);
       return {
         ...state,
         view:         'yearDetail',
@@ -141,13 +95,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
         loading:      false,
         selectedYear: action.year,
         events:       action.events,
-        // Every successfully opened year becomes a node on the map,
-        // linked to its chronologically nearest existing node …
-        mapYears: isNewYear ? [...state.mapYears, action.year] : state.mapYears,
-        mapLinks: isNewYear && state.mapYears.length > 0
-          ? [...state.mapLinks, { source: nearestYear(state.mapYears, action.year), target: action.year }]
-          : state.mapLinks,
-        // … and is remembered as visited (highlighted on the map)
+        // The map lays years out deterministically, so opening one only needs
+        // to be remembered as visited (highlighted, and flown to on return).
         visitedYears: state.visitedYears.has(action.year)
           ? state.visitedYears
           : new Set(state.visitedYears).add(action.year),
@@ -170,8 +119,6 @@ const initialState: AppState = {
   view:             'yearMap',
   selectedYear:     null,
   pendingYear:      null,
-  mapYears:         SEED_YEARS,
-  mapLinks:         SEED_LINKS,
   visitedYears:     new Set<number>(),
   events:           [],
   loading:          false,
@@ -185,7 +132,7 @@ const initialState: AppState = {
 export default function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
   const {
-    view, selectedYear, pendingYear, mapYears, mapLinks, visitedYears,
+    view, selectedYear, pendingYear, visitedYears,
     events, loading, error, selectedEvent, activeCategories,
   } = state;
 
@@ -222,8 +169,6 @@ export default function App() {
         <>
           <h1 className="chrono-brand">ChronoGraph</h1>
           <YearMap
-            years={mapYears}
-            links={mapLinks}
             visitedYears={visitedYears}
             lastVisitedYear={lastVisitedYear}
             onYearSelect={handleSearch}

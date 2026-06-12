@@ -60,18 +60,10 @@ export interface NodeDatum {
 
 // ── YearMap component types ───────────────────────────────────────────────────
 
-/** A connection between two year nodes on the map, by year value. */
-export interface YearMapLink {
-  source: number;
-  target: number;
-}
-
 export interface YearMapProps {
-  years:        number[];
-  links:        YearMapLink[];
   /** Years the user has already opened — rendered with a glowing ring. */
   visitedYears: Set<number>;
-  /** The most recently visited year; triggers node expansion on return. */
+  /** The most recently visited year; the camera flies to it on return. */
   lastVisitedYear: number | null;
   onYearSelect: (year: number) => void;
 }

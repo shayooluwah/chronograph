@@ -3,44 +3,66 @@ import * as d3 from 'd3';
 import { hexToRgba } from '../utils/colors';
 import type { YearMapProps } from '../types';
 
-// ── Internal D3 datum types ───────────────────────────────────────────────────
+// ── Palette ───────────────────────────────────────────────────────────────────
 
 const NODE_COLOR    = '#9ab0ff';
 const VISITED_COLOR = '#ffd9a0'; // warm gold — marks years already explored
 
-/** Hard cap on simulation nodes to keep the force layout cheap. */
-const MAX_NODES = 50;
+// ── Spiral geometry ───────────────────────────────────────────────────────────
+//
+// The map is an infinite, deterministic coordinate space: every year owns a
+// fixed point on an Archimedean spiral, so panning/zooming just moves the
+// camera over a world that never changes. CENTER_YEAR is a FIXED, persisted
+// anchor — it must never be recomputed per session, since the entire layout is
+// relative to it and recentring would reshuffle every node.
 
-/** The map starts pushing outward on its own once this many years are visited. */
-const AUTO_EXPAND_AFTER_VISITS = 5;
+const CENTER_YEAR = 1900;
+const R0          = 140;  // radius of the innermost ring (world px)
+const RADIAL_K    = 42;   // world px added to the radius per year from centre
+const THETA_STEP  = 0.5;  // radians of rotation per year
 
-/** Offsets for years grown out of a visited node — deliberately not round
- *  numbers so the expansion doesn't feel artificial. */
-const EXPANSION_OFFSETS = [-12, 11, 27];
-
-/** Years grown client-side from visited nodes (year → parent year).
- *  Module scope on purpose: YearMap unmounts while a yearDetail is open, so
- *  per-instance state would lose un-clicked expansions on every visit. */
-const EXPANDED_YEARS = new Map<number, number>();
-
-interface YearNode extends d3.SimulationNodeDatum {
-  id:          number;  // the year itself
-  isNew:       boolean; // appeared this render — gets the grow-out entry animation
-  driftPhase:  number;  // initial sine phase offset (radians)
-  driftPeriod: number;  // ms per full drift cycle
-  driftAmp:    number;  // px of float either side of the simulated position
-  renderX?:    number;  // simulated position + drift, written each frame
-  renderY?:    number;
+/** Small deterministic per-year offset: hashing the year gives an organic
+ *  wobble that is identical on every render, so positions stay stable. */
+const JITTER = 9;
+function hashJitter(year: number, salt: number): number {
+  const s = Math.sin((year + 1) * (12.9898 + salt) + salt * 78.233) * 43758.5453;
+  return ((s - Math.floor(s)) * 2 - 1) * JITTER;
 }
 
-type YearLink = d3.SimulationLinkDatum<YearNode>;
+/** Deterministic world-space position for a year. Future years spiral one
+ *  angular direction, past years the other, both growing out of the same core,
+ *  so consecutive years stay spatial neighbours and panning outward travels
+ *  further from CENTER_YEAR. */
+export function yearToPosition(year: number): { x: number; y: number } {
+  const n     = year - CENTER_YEAR;
+  const theta = n * THETA_STEP;
+  const r     = R0 + RADIAL_K * Math.abs(n);
+  return {
+    x: r * Math.cos(theta) + hashJitter(year, 1),
+    y: r * Math.sin(theta) + hashJitter(year, 2),
+  };
+}
 
-type StoredPositions = Map<number, { x: number; y: number }>;
+// ── Bounds helpers ────────────────────────────────────────────────────────────
 
-// ── Pure D3 helpers (module scope, no React state) ────────────────────────────
+interface Bounds { minX: number; minY: number; maxX: number; maxY: number; }
 
-/** Coloured glow filters, same recipe as Graph.tsx: one blue for unvisited
- *  nodes, one gold for visited nodes. */
+function inBounds(p: { x: number; y: number }, b: Bounds, margin = 0): boolean {
+  return p.x >= b.minX - margin && p.x <= b.maxX + margin
+      && p.y >= b.minY - margin && p.y <= b.maxY + margin;
+}
+
+/** Distance from the spiral core (world origin) to the furthest rect corner. */
+function furthestCornerDistanceFromCenter(b: Bounds): number {
+  let max = 0;
+  for (const x of [b.minX, b.maxX]) {
+    for (const y of [b.minY, b.maxY]) max = Math.max(max, Math.hypot(x, y));
+  }
+  return max;
+}
+
+// ── Glow / shadow filters (same recipe as before) ─────────────────────────────
+
 function appendGlowFilters(svg: d3.Selection<SVGSVGElement, unknown, null, undefined>): void {
   const defs = svg.append('defs');
 
@@ -89,271 +111,8 @@ function appendGlowFilters(svg: d3.Selection<SVGSVGElement, unknown, null, undef
     .attr('flood-opacity', 0.8);
 }
 
-/** Build simulation nodes. Existing nodes resume their last simulated
- *  position; first-render nodes seed on a loose arc so chronological order
- *  reads left-to-right; new nodes spawn at a linked neighbour's position so
- *  the forces visibly push them outward from the node they connect to. */
-function buildNodes(
-  sortedYears: number[],
-  links:       YearMapProps['links'],
-  stored:      StoredPositions,
-  w: number, h: number, cx: number, cy: number,
-): YearNode[] {
-  const isFirstRender = stored.size === 0;
+// ── Container dims (resize → effect re-run, no React re-render) ────────────────
 
-  const nodes: YearNode[] = sortedYears.map((year, i) => {
-    const t    = sortedYears.length > 1 ? i / (sortedYears.length - 1) : 0.5;
-    const prev = stored.get(year);
-    return {
-      id:          year,
-      isNew:       !isFirstRender && !prev,
-      x:           prev?.x ?? cx + (t - 0.5) * w * 0.6,
-      y:           prev?.y ?? cy + Math.sin(t * Math.PI * 2.5) * h * 0.18,
-      driftPhase:  Math.random() * Math.PI * 2,
-      driftPeriod: (5 + Math.random() * 3) * 1000, // 5 – 8 s, gentler than node pulse
-      driftAmp:    4 + Math.random() * 5,          // 4 – 9 px float
-    };
-  });
-
-  for (const node of nodes) {
-    if (!node.isNew) continue;
-    for (const l of links) {
-      if (l.source !== node.id && l.target !== node.id) continue;
-      const neighbourPos = stored.get(l.source === node.id ? l.target : l.source);
-      if (neighbourPos) {
-        node.x = neighbourPos.x + (Math.random() - 0.5) * 24;
-        node.y = neighbourPos.y + (Math.random() - 0.5) * 24;
-        break;
-      }
-    }
-  }
-
-  return nodes;
-}
-
-/** Links from props (chronological chain + expansion spokes), dropping any
- *  whose endpoints are not on the map. */
-function buildSimLinks(sortedYears: number[], links: YearMapProps['links']): YearLink[] {
-  const present  = new Set(sortedYears);
-  const simLinks: YearLink[] = [];
-  for (const l of links) {
-    if (present.has(l.source) && present.has(l.target)) {
-      simLinks.push({ source: l.source, target: l.target });
-    }
-  }
-  return simLinks;
-}
-
-/** Merge client-grown years (EXPANDED_YEARS) into the prop data so expansions
- *  survive full D3 rebuilds and YearMap remounts — props only gain a grown
- *  year once the user actually visits it. */
-function mergeExpansions(years: number[], links: YearMapProps['links']) {
-  const mergedYears = [...years];
-  const mergedLinks = [...links];
-  const present     = new Set(years);
-  for (const [year, parent] of EXPANDED_YEARS) {
-    if (!present.has(year) && mergedYears.length < MAX_NODES) {
-      present.add(year);
-      mergedYears.push(year);
-      mergedLinks.push({ source: parent, target: year });
-    }
-  }
-  return { mergedYears, mergedLinks };
-}
-
-/** Expansion candidates for a visited year: fixed offsets, skipping year 0
- *  (does not exist) and duplicates, respecting the node cap. */
-function pickExpansionYears(visitedYear: number, current: YearNode[]): number[] {
-  const existing = new Set<number>();
-  for (const n of current) existing.add(n.id);
-  const fresh: number[] = [];
-  for (const offset of EXPANSION_OFFSETS) {
-    const y = visitedYear + offset;
-    if (y === 0 || existing.has(y)) continue;
-    if (current.length + fresh.length >= MAX_NODES) break;
-    fresh.push(y);
-  }
-  return fresh;
-}
-
-/** Fresh simulation datums spawned at (px, py), with a little jitter so
- *  identical start positions don't degenerate the forces. */
-function spawnNodesAt(years: number[], px: number, py: number): YearNode[] {
-  return years.map(y => ({
-    id:          y,
-    isNew:       true,
-    x:           px + (Math.random() - 0.5) * 8,
-    y:           py + (Math.random() - 0.5) * 8,
-    driftPhase:  Math.random() * Math.PI * 2,
-    driftPeriod: (5 + Math.random() * 3) * 1000,
-    driftAmp:    4 + Math.random() * 5,
-  }));
-}
-
-interface NodeStyle {
-  RX:        number;
-  RY:        number;
-  isMobile:  boolean;
-  isVisited: (d: YearNode) => boolean;
-  baseFill:  (d: YearNode) => string;
-}
-
-/** Appends the ring / body / label structure to entered node groups. */
-function decorateNodeEnter(
-  enter: d3.Selection<SVGGElement, YearNode, SVGGElement, unknown>,
-  { RX, RY, isMobile, isVisited, baseFill }: NodeStyle,
-): void {
-  // Visited marker: a soft outer ring drawn behind the main ellipse
-  enter.filter(isVisited).append('ellipse')
-    .attr('class',        'visited-ring')
-    .attr('rx',           RX + 7)
-    .attr('ry',           RY + 7)
-    .attr('fill',         'none')
-    .attr('stroke',       hexToRgba(VISITED_COLOR, 0.55))
-    .attr('stroke-width', 1.5)
-    .attr('filter',       'url(#glow-yearmap-visited)');
-
-  enter.append('ellipse')
-    .attr('class',        'node-body')
-    .attr('rx',           RX)
-    .attr('ry',           RY)
-    .attr('fill',         baseFill)
-    .attr('stroke',       d => hexToRgba(isVisited(d) ? VISITED_COLOR : NODE_COLOR, 0.8))
-    .attr('stroke-width', 1.5)
-    .attr('filter',       d => isVisited(d) ? 'url(#glow-yearmap-visited)' : 'url(#glow-yearmap)');
-
-  enter.append('text')
-    .attr('text-anchor',       'middle')
-    .attr('dominant-baseline', 'central')
-    .attr('fill',              '#ffffff')
-    .attr('font-weight',       600)
-    .attr('font-size',         isMobile ? '12px' : '14px')
-    .attr('font-family',       'system-ui, sans-serif')
-    .attr('letter-spacing',    '0.5')
-    .attr('pointer-events',    'none')
-    .attr('filter',            'url(#text-shadow-yearmap)')
-    .text(d => String(d.id));
-}
-
-/** Stable identity for a link whether its ends are still raw year numbers or
- *  already resolved to node objects by the force simulation. */
-const endId   = (end: YearLink['source']): number =>
-  (typeof end === 'object' ? end.id : (end as number)); // ids are always year numbers here
-const linkKey = (l: YearLink) => `${endId(l.source)}→${endId(l.target)}`;
-
-/** Among unvisited nodes adjacent to a visited one (the exploration
- *  frontier), the oldest by year value; falls back to the oldest unvisited
- *  node anywhere if no frontier exists yet. */
-function oldestUnvisitedNeighbour(
-  nodes:   YearNode[],
-  links:   YearLink[],
-  visited: Set<number>,
-): number | null {
-  const frontier = new Set<number>();
-  for (const l of links) {
-    const s = endId(l.source);
-    const t = endId(l.target);
-    if (visited.has(s) && !visited.has(t)) frontier.add(t);
-    if (visited.has(t) && !visited.has(s)) frontier.add(s);
-  }
-  let oldest: number | null = null;
-  for (const n of nodes) {
-    if (visited.has(n.id)) continue;
-    if (frontier.size > 0 && !frontier.has(n.id)) continue;
-    if (oldest === null || n.id < oldest) oldest = n.id;
-  }
-  return oldest;
-}
-
-/** Fixed placement angles for the three hover ghosts. */
-const GHOST_ANGLES = [-Math.PI / 2, Math.PI / 6, (5 * Math.PI) / 6];
-
-/** Dashed, label-less ghost ellipses hinting at the expansion positions
- *  around a hovered node — only for years not already on the map. */
-function showGhostRing(
-  layer:   d3.Selection<SVGGElement, unknown, null, undefined>,
-  d:       YearNode,
-  current: YearNode[],
-  RX: number, RY: number, dist: number,
-): void {
-  const existing = new Set<number>();
-  for (const n of current) existing.add(n.id);
-
-  const px = d.renderX ?? d.x ?? 0;
-  const py = d.renderY ?? d.y ?? 0;
-
-  layer.selectAll('*').interrupt().remove();
-  EXPANSION_OFFSETS.forEach((offset, i) => {
-    const y = d.id + offset;
-    if (y === 0 || existing.has(y)) return;
-    layer.append('ellipse')
-      .attr('cx',               px + Math.cos(GHOST_ANGLES[i]) * dist)
-      .attr('cy',               py + Math.sin(GHOST_ANGLES[i]) * dist)
-      .attr('rx',               RX * 0.75)
-      .attr('ry',               RY * 0.75)
-      .attr('fill',             'none')
-      .attr('stroke',           hexToRgba(NODE_COLOR, 0.4))
-      .attr('stroke-width',     1)
-      .attr('stroke-dasharray', '4 6')
-      .attr('opacity',          0)
-      .transition().duration(180)
-      .attr('opacity', 0.7);
-  });
-}
-
-function clearGhostRing(layer: d3.Selection<SVGGElement, unknown, null, undefined>): void {
-  layer.selectAll('ellipse')
-    .interrupt()
-    .transition().duration(120)
-    .attr('opacity', 0)
-    .remove();
-}
-
-/** Expansion entry: scale 0 / opacity 0 → full over 600ms, the same
- *  easeBackOut pop as Graph.tsx's burst entry. */
-function animateGrowth(enter: d3.Selection<SVGGElement, YearNode, SVGGElement, unknown>): void {
-  enter
-    .attr('opacity', 0)
-    .transition().duration(600).ease(d3.easeBackOut)
-    .attr('opacity', 1);
-  enter.select('ellipse.node-body')
-    .attr('transform', 'scale(0)')
-    .transition().duration(600).ease(d3.easeBackOut)
-    .attr('transform', 'scale(1)');
-}
-
-interface GhostApi {
-  show(d: YearNode): void;
-  hide(): void;
-}
-
-/** Hover handlers shared by initial and expanded nodes. `isZooming` defers
- *  to the zoom-exit animation, which owns the ellipse while it plays. */
-function makeHoverHandlers(style: NodeStyle, isZooming: () => boolean, ghosts: GhostApi) {
-  return {
-    onPointerEnter(this: SVGGElement, _: unknown, d: YearNode) {
-      if (isZooming()) return;
-      ghosts.show(d);
-      d3.select(this).select('ellipse.node-body')
-        .interrupt()
-        .transition().duration(130).ease(d3.easeCubicOut)
-        .attr('transform', 'scale(1.15)')
-        .attr('fill', hexToRgba(style.isVisited(d) ? VISITED_COLOR : NODE_COLOR, 0.34));
-    },
-    onPointerLeave(this: SVGGElement, _: unknown, d: YearNode) {
-      if (isZooming()) return;
-      ghosts.hide();
-      d3.select(this).select('ellipse.node-body')
-        .interrupt()
-        .transition().duration(130).ease(d3.easeCubicOut)
-        .attr('transform', 'scale(1)')
-        .attr('fill', style.baseFill(d));
-    },
-  };
-}
-
-/** Dims-in-a-ref + render-counter pattern (same as Graph.tsx): ResizeObserver
- *  updates never cause React re-renders, only D3 effect re-runs via the key. */
 function useContainerDims(ref: React.RefObject<HTMLDivElement | null>) {
   const dimsRef = useRef({ w: 0, h: 0 });
   const [renderKey, bumpRender] = useReducer((n: number) => n + 1, 0);
@@ -361,7 +120,6 @@ function useContainerDims(ref: React.RefObject<HTMLDivElement | null>) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    // Eagerly capture initial size so the D3 effect fires on mount
     dimsRef.current = { w: Math.floor(el.clientWidth), h: Math.floor(el.clientHeight) };
     bumpRender();
     const obs = new ResizeObserver(([entry]) => {
@@ -378,28 +136,27 @@ function useContainerDims(ref: React.RefObject<HTMLDivElement | null>) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function YearMap({ years, links, visitedYears, lastVisitedYear, onYearSelect }: YearMapProps) {
+export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }: YearMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef       = useRef<SVGSVGElement>(null);
 
-  /** Expansion entry point into the current D3 scene; (re)assigned by the
-   *  render effect so it always closes over the live simulation. */
-  const expandRef = useRef<((visitedYear: number) => void) | null>(null);
-
-  /** Last simulated position per year, persisted across D3 re-renders so
-   *  existing nodes stay put and only genuinely new nodes animate in.
-   *  Lazily initialised so the Map is not rebuilt on every render. */
-  const positionsRef = useRef<Map<number, { x: number; y: number }> | null>(null);
-  positionsRef.current ??= new Map();
-
-  /** Keep the callback in a ref so the heavyweight D3 effect does NOT need to
-   *  re-run every time the parent re-renders with a new arrow-function identity. */
+  // Keep callback / visited set current without re-running the heavy D3 effect.
   const onSelectRef = useRef(onYearSelect);
   useEffect(() => { onSelectRef.current = onYearSelect; }, [onYearSelect]);
+  const visitedRef = useRef(visitedYears);
+  useEffect(() => { visitedRef.current = visitedYears; }, [visitedYears]);
+
+  /** Camera transform, persisted across resize-driven rebuilds so a resize
+   *  doesn't fling the viewport back to the core. */
+  const transformRef = useRef<d3.ZoomTransform | null>(null);
+
+  /** Fly the camera to a year — (re)assigned by the render effect so it always
+   *  closes over the live zoom behaviour. */
+  const flyToRef = useRef<((year: number) => void) | null>(null);
 
   const { dimsRef, renderKey } = useContainerDims(containerRef);
 
-  // ── D3 render ───────────────────────────────────────────────────────────────
+  // ── D3 render ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const svgEl = svgRef.current;
@@ -407,11 +164,10 @@ export default function YearMap({ years, links, visitedYears, lastVisitedYear, o
     if (!svgEl || dims.w === 0 || dims.h === 0) return;
 
     const { w, h } = dims;
-    const cx = w / 2;
-    const cy = h / 2;
     const isMobile = w < 768;
-    const RX = isMobile ? 34 : 44; // ellipse horizontal radius
-    const RY = isMobile ? 19 : 24; // ellipse vertical radius
+    const RX = isMobile ? 30 : 40; // ellipse horizontal radius
+    const RY = isMobile ? 17 : 22; // ellipse vertical radius
+    const nodeMargin = Math.max(RX, RY);
 
     const svg = d3.select(svgEl);
     svg.selectAll('*').remove();
@@ -419,240 +175,261 @@ export default function YearMap({ years, links, visitedYears, lastVisitedYear, o
 
     appendGlowFilters(svg);
 
-    // ── Zoom / pan ─────────────────────────────────────────────────────────────
+    const scene     = svg.append('g').attr('class', 'scene');
+    const linkLayer = scene.append('g').attr('class', 'links');
+    const nodeLayer = scene.append('g').attr('class', 'nodes');
 
-    const scene = svg.append('g').attr('class', 'scene');
+    const isVisited = (year: number) => visitedRef.current.has(year);
+    const baseFill  = (year: number) =>
+      hexToRgba(isVisited(year) ? VISITED_COLOR : NODE_COLOR, isVisited(year) ? 0.22 : 0.16);
 
-    const zoomBehaviour = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.2, 5])
+    // Currently mounted years (year → fixed position) and their live, lerped
+    // opacity for the proximity fade.
+    const mounted = new Map<number, { x: number; y: number }>();
+    const opacity = new Map<number, number>();
+
+    let navigating = false; // true while a zoom-into-node exit is playing
+
+    // ── Zoom / pan ────────────────────────────────────────────────────────────
+
+    const BUFFER     = 0.4; // expand the visible rect by 40% for generation
+    const HYSTERESIS = 80;  // extra px a node must leave before it unmounts
+
+    const zoom = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.3, 4])
       .on('zoom', (e: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+        transformRef.current = e.transform;
         scene.attr('transform', e.transform.toString());
+        scheduleRegen();
       });
 
-    svg
-      .call(zoomBehaviour)
-      .on('dblclick.zoom', null);
+    svg.call(zoom).on('dblclick.zoom', null);
 
-    // ── Nodes & links ──────────────────────────────────────────────────────────
-
-    const { mergedYears, mergedLinks } = mergeExpansions(years, links);
-
-    const sortedYears   = mergedYears.toSorted((a, b) => a - b);
-    const stored        = positionsRef.current!; // initialised during render, never null here
-    const isFirstRender = stored.size === 0;
-
-    // Mutable graph data: the expansion path appends to these and re-joins,
-    // so the simulation keeps running on the same arrays it was given.
-    let allNodes = buildNodes(sortedYears, mergedLinks, stored, w, h, cx, cy);
-    let allLinks = buildSimLinks(sortedYears, mergedLinks);
-
-    const linkLayer  = scene.append('g').attr('class', 'links');
-    const ghostLayer = scene.append('g').attr('class', 'ghosts').attr('pointer-events', 'none');
-    const nodeLayer  = scene.append('g').attr('class', 'nodes');
-
-    const isVisited = (d: YearNode) => visitedYears.has(d.id);
-    const baseFill  = (d: YearNode) =>
-      hexToRgba(isVisited(d) ? VISITED_COLOR : NODE_COLOR, isVisited(d) ? 0.22 : 0.16);
-    const nodeStyle: NodeStyle = { RX, RY, isMobile, isVisited, baseFill };
-
-    // Set while the zoom-into-node exit animation plays; blocks hover/clicks.
-    let zooming = false;
-    let restoreTimeout: number | undefined;
-
-    const ghostApi: GhostApi = {
-      show: d => showGhostRing(ghostLayer, d, allNodes, RX, RY, isMobile ? 70 : 100),
-      hide: () => clearGhostRing(ghostLayer),
-    };
-    const { onPointerEnter, onPointerLeave } = makeHoverHandlers(nodeStyle, () => zooming, ghostApi);
-
-    // Reassigned by the join helpers whenever nodes are added, so the event
-    // handlers and the drift timer below always operate on the full set.
-    let linkSel: d3.Selection<SVGLineElement, YearLink, SVGGElement, unknown>;
-    let nodeSel: d3.Selection<SVGGElement, YearNode, SVGGElement, unknown>;
-
-    /** Data-join lines for `allLinks`; returns the enter selection. */
-    function joinLinks() {
-      const join  = linkLayer.selectAll<SVGLineElement, YearLink>('line').data(allLinks, linkKey);
-      const enter = join.enter().append('line')
-        .attr('stroke',       'rgba(154,176,255,0.22)')
-        .attr('stroke-width', 1.2);
-      linkSel = join.merge(enter);
-      return enter;
+    function transformFor(year: number, k: number): d3.ZoomTransform {
+      const p = yearToPosition(year);
+      return d3.zoomIdentity.translate(w / 2 - k * p.x, h / 2 - k * p.y).scale(k);
     }
 
-    /** Data-join groups for `allNodes`, decorating and wiring new ones;
-     *  returns the enter selection. */
+    function visibleWorldBounds(): Bounds {
+      const t = transformRef.current ?? d3.zoomIdentity;
+      const [x0, y0] = t.invert([0, 0]);
+      const [x1, y1] = t.invert([w, h]);
+      return { minX: x0, minY: y0, maxX: x1, maxY: y1 };
+    }
+
+    function generationBounds(): Bounds {
+      const b  = visibleWorldBounds();
+      const ex = (b.maxX - b.minX) * BUFFER;
+      const ey = (b.maxY - b.minY) * BUFFER;
+      return { minX: b.minX - ex, minY: b.minY - ey, maxX: b.maxX + ex, maxY: b.maxY + ey };
+    }
+
+    // ── Generation + culling ──────────────────────────────────────────────────
+
+    let regenScheduled = false;
+    function scheduleRegen() {
+      if (regenScheduled) return;
+      regenScheduled = true;
+      requestAnimationFrame(() => { regenScheduled = false; regenerate(); });
+    }
+
+    function regenerate() {
+      const gen     = generationBounds();
+      const maxDist = furthestCornerDistanceFromCenter(gen);
+      // r is monotonic in |n|, so the candidate set is bounded directly.
+      const nMax = Math.ceil((maxDist - R0) / RADIAL_K) + 2; // +2 absorbs jitter
+
+      // Mount any year whose deterministic position falls inside the gen rect.
+      for (let n = -nMax; n <= nMax; n++) {
+        const year = CENTER_YEAR + n;
+        const p    = yearToPosition(year);
+        if (inBounds(p, gen, nodeMargin) && !mounted.has(year)) {
+          mounted.set(year, p);
+          opacity.set(year, 0); // fade in from darkness
+        }
+      }
+
+      // Unmount years that have left the gen rect plus a hysteresis margin, so
+      // nodes hovering on the edge don't flicker in and out.
+      for (const year of [...mounted.keys()]) {
+        if (!inBounds(mounted.get(year)!, gen, nodeMargin + HYSTERESIS)) {
+          mounted.delete(year);
+          opacity.delete(year);
+        }
+      }
+
+      joinNodes();
+      joinLinks();
+    }
+
+    // ── Data joins ────────────────────────────────────────────────────────────
+
     function joinNodes() {
-      const join  = nodeLayer.selectAll<SVGGElement, YearNode>('g.year-node').data(allNodes, d => d.id);
-      const enter = join.enter().append('g')
-        .attr('class',  'year-node')
-        .style('cursor', 'pointer');
+      const sel = nodeLayer.selectAll<SVGGElement, number>('g.year-node')
+        .data([...mounted.keys()], d => d);
 
-      decorateNodeEnter(enter, nodeStyle);
+      sel.exit().remove();
 
-      enter
+      const enter = sel.enter().append('g')
+        .attr('class',     'year-node')
+        .style('cursor',   'pointer')
+        .attr('transform', d => { const p = yearToPosition(d); return `translate(${p.x},${p.y})`; })
+        .attr('opacity',   0)
         .on('pointerenter', onPointerEnter)
         .on('pointerleave', onPointerLeave)
         .on('click',        onNodeClick);
 
-      nodeSel = join.merge(enter);
-      return enter;
+      // Visited marker: soft outer ring behind the body
+      enter.filter(d => isVisited(d)).append('ellipse')
+        .attr('class',        'visited-ring')
+        .attr('rx',           RX + 7)
+        .attr('ry',           RY + 7)
+        .attr('fill',         'none')
+        .attr('stroke',       hexToRgba(VISITED_COLOR, 0.55))
+        .attr('stroke-width', 1.5)
+        .attr('filter',       'url(#glow-yearmap-visited)');
+
+      enter.append('ellipse')
+        .attr('class',        'node-body')
+        .attr('rx',           RX)
+        .attr('ry',           RY)
+        .attr('fill',         d => baseFill(d))
+        .attr('stroke',       d => hexToRgba(isVisited(d) ? VISITED_COLOR : NODE_COLOR, 0.8))
+        .attr('stroke-width', 1.5)
+        .attr('filter',       d => isVisited(d) ? 'url(#glow-yearmap-visited)' : 'url(#glow-yearmap)');
+
+      enter.append('text')
+        .attr('text-anchor',       'middle')
+        .attr('dominant-baseline', 'central')
+        .attr('fill',              '#ffffff')
+        .attr('font-weight',       600)
+        .attr('font-size',         isMobile ? '12px' : '14px')
+        .attr('font-family',       'system-ui, sans-serif')
+        .attr('letter-spacing',    '0.5')
+        .attr('pointer-events',    'none')
+        .attr('filter',            'url(#text-shadow-yearmap)')
+        .text(d => String(d));
     }
 
-    joinLinks();
-    const enterNodes = joinNodes();
+    function joinLinks() {
+      // Edges only between mounted consecutive years (n and n+1).
+      const pairs: number[] = [];
+      for (const year of mounted.keys()) if (mounted.has(year + 1)) pairs.push(year);
 
-    // Entry animation: first render staggers everything in; afterwards only
-    // new nodes appear, growing out of their spawn point as the forces push them.
-    enterNodes.attr('opacity', d => (isFirstRender || d.isNew) ? 0 : 1);
+      const sel = linkLayer.selectAll<SVGLineElement, number>('line').data(pairs, d => d);
+      sel.exit().remove();
+      sel.enter().append('line')
+        .attr('stroke',       'rgba(154,176,255,0.22)')
+        .attr('stroke-width', 1.2)
+        .merge(sel)
+        .attr('x1', d => yearToPosition(d).x)
+        .attr('y1', d => yearToPosition(d).y)
+        .attr('x2', d => yearToPosition(d + 1).x)
+        .attr('y2', d => yearToPosition(d + 1).y);
+    }
 
-    enterNodes.filter(d => isFirstRender || d.isNew)
-      .transition().duration(500).delay((_, i) => i * 60).ease(d3.easeCubicOut)
-      .attr('opacity', 1);
+    // ── Interactions ──────────────────────────────────────────────────────────
 
-    enterNodes.filter(d => d.isNew).select('ellipse.node-body')
-      .attr('transform', 'scale(0.2)')
-      .transition().duration(550).ease(d3.easeBackOut)
-      .attr('transform', 'scale(1)');
+    function onPointerEnter(this: SVGGElement, _: unknown, year: number) {
+      if (navigating) return;
+      d3.select(this).select('ellipse.node-body')
+        .interrupt()
+        .transition().duration(130).ease(d3.easeCubicOut)
+        .attr('transform', 'scale(1.15)')
+        .attr('fill', hexToRgba(isVisited(year) ? VISITED_COLOR : NODE_COLOR, 0.34));
+    }
 
-    // ── Force simulation ───────────────────────────────────────────────────────
+    function onPointerLeave(this: SVGGElement, _: unknown, year: number) {
+      if (navigating) return;
+      d3.select(this).select('ellipse.node-body')
+        .interrupt()
+        .transition().duration(130).ease(d3.easeCubicOut)
+        .attr('transform', 'scale(1)')
+        .attr('fill', baseFill(year));
+    }
 
-    const simulation = d3.forceSimulation<YearNode>(allNodes)
-      .force('link', d3.forceLink<YearNode, YearLink>(allLinks)
-        .id(d => d.id)
-        .distance(isMobile ? 110 : 170)
-        .strength(0.4))
-      .force('charge',  d3.forceManyBody().strength(isMobile ? -240 : -420))
-      .force('center',  d3.forceCenter(cx, cy))
-      .force('collide', d3.forceCollide(RX + 14));
-
-    // Re-renders restart with reduced energy so settled nodes barely shift
-    // while newcomers still get pushed out to a free spot.
-    if (!isFirstRender) simulation.alpha(0.45);
-
-    // ── Interactions ───────────────────────────────────────────────────────────
-
-    function onNodeClick(this: SVGGElement, ev: Event, d: YearNode) {
+    function onNodeClick(this: SVGGElement, ev: Event, year: number) {
       (ev as MouseEvent).stopPropagation();
-      if (zooming) return;
-      zooming = true;
-      ghostApi.hide(); // pointerleave won't fire once the map fades out
+      if (navigating) return;
+      navigating = true;
 
-      // Zoom-into-node exit: the chosen node swells while everything else
-      // fades, then navigation fires and the loading overlay takes over.
-      const ZOOM_MS = 450;
-      const chosen  = d3.select(this);
+      const chosen = d3.select(this);
       chosen.raise();
 
-      nodeSel.filter(nd => nd.id !== d.id)
-        .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
-        .attr('opacity', 0);
-      linkSel
-        .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
-        .attr('opacity', 0);
-
+      const ZOOM_MS = 400;
       chosen.select('ellipse.node-body')
         .interrupt()
         .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
-        .attr('transform', 'scale(3)');
+        .attr('transform', 'scale(2.8)');
       chosen
         .transition().duration(ZOOM_MS).ease(d3.easeCubicIn)
         .attr('opacity', 0)
         .on('end', () => {
-          onSelectRef.current(d.id);
-          // If navigation succeeds the map unmounts and this never shows.
-          // If the fetch fails the view stays on the map, so bring it back.
-          restoreTimeout = window.setTimeout(() => {
-            zooming = false;
-            nodeSel.transition().duration(400).attr('opacity', 1);
-            linkSel.transition().duration(400).attr('opacity', 1);
+          onSelectRef.current(year);
+          // If navigation succeeds the map unmounts. If the fetch fails the
+          // view stays here, so restore the node and re-enable interaction.
+          window.setTimeout(() => {
+            navigating = false;
             chosen.select('ellipse.node-body')
-              .transition().duration(400)
-              .attr('transform', 'scale(1)');
+              .interrupt().transition().duration(300).attr('transform', 'scale(1)');
+            chosen.interrupt().transition().duration(300).attr('opacity', 1);
           }, 1200);
         });
     }
 
-    // ── Dynamic expansion: grow new years out of a just-visited node ───────────
+    // ── Proximity fade (one timer, lerps every mounted node toward its target
+    //    opacity so years emerge from darkness as the viewport nears them) ─────
 
-    function expandFrom(originYear: number) {
-      const parent = allNodes.find(n => n.id === originYear);
-      if (!parent) return;
+    const fadeTimer = d3.timer(() => {
+      if (navigating) return;
+      const t = transformRef.current ?? d3.zoomIdentity;
+      const [centerX, centerY] = t.invert([w / 2, h / 2]);
+      const b    = visibleWorldBounds();
+      const visR = 0.5 * Math.min(b.maxX - b.minX, b.maxY - b.minY); // inside viewport
+      const bufR = visR * (1 + BUFFER);                              // out in the buffer ring
 
-      const fresh = pickExpansionYears(originYear, allNodes);
-      if (fresh.length === 0) return;
-
-      // Spawn at the origin node's current position so they grow out of it
-      const newNodes = spawnNodesAt(fresh, parent.x ?? cx, parent.y ?? cy);
-
-      allNodes = allNodes.concat(newNodes);
-      allLinks = allLinks.concat(fresh.map(y => ({ source: originYear, target: y })));
-      for (const y of fresh) EXPANDED_YEARS.set(y, originYear);
-
-      joinLinks();
-      animateGrowth(joinNodes());
-
-      // Feed the running simulation — no rebuild, just a gentle re-settle
-      simulation.nodes(allNodes);
-      (simulation.force('link') as d3.ForceLink<YearNode, YearLink>).links(allLinks);
-      simulation.alpha(0.3).restart();
-    }
-
-    expandRef.current = (visitedYear: number) => {
-      expandFrom(visitedYear);
-      // Once the user has explored enough, the map pushes outward on its own:
-      // also grow from the oldest unexplored frontier node on each return.
-      if (visitedYears.size >= AUTO_EXPAND_AFTER_VISITS) {
-        const frontier = oldestUnvisitedNeighbour(allNodes, allLinks, visitedYears);
-        if (frontier !== null && frontier !== visitedYear) expandFrom(frontier);
-      }
-    };
-
-    // ── Render loop: simulation position + sine-wave drift ─────────────────────
-    // One d3.timer owns all transforms (same pattern as Graph.tsx's pulse);
-    // the simulation only updates d.x / d.y, the timer composes the drift on top.
-
-    const driftTimer = d3.timer((elapsed: number) => {
-      nodeSel.attr('transform', d => {
-        const t  = (elapsed / d.driftPeriod) * Math.PI * 2;
-        const dx = d.driftAmp * Math.sin(d.driftPhase + t);
-        const dy = d.driftAmp * Math.cos(d.driftPhase * 1.7 + t * 1.23);
-        d.renderX = (d.x ?? cx) + dx;
-        d.renderY = (d.y ?? cy) + dy;
-        // Persist the simulated (un-drifted) position for the next render
-        stored.set(d.id, { x: d.x ?? cx, y: d.y ?? cy });
-        return `translate(${d.renderX.toFixed(2)},${d.renderY.toFixed(2)})`;
+      nodeLayer.selectAll<SVGGElement, number>('g.year-node').each(function (year) {
+        const p = yearToPosition(year);
+        const d = Math.hypot(p.x - centerX, p.y - centerY);
+        const target = d <= visR ? 1
+          : d >= bufR ? 0.15
+          : 1 - 0.85 * ((d - visR) / (bufR - visR));
+        const next = (opacity.get(year) ?? 0) + (target - (opacity.get(year) ?? 0)) * 0.15;
+        opacity.set(year, next);
+        d3.select(this).attr('opacity', next);
       });
 
-      linkSel
-        .attr('x1', d => (d.source as YearNode).renderX ?? cx)
-        .attr('y1', d => (d.source as YearNode).renderY ?? cy)
-        .attr('x2', d => (d.target as YearNode).renderX ?? cx)
-        .attr('y2', d => (d.target as YearNode).renderY ?? cy);
+      // Connectors fade with the dimmer of their two endpoints.
+      linkLayer.selectAll<SVGLineElement, number>('line')
+        .attr('opacity', d => Math.min(opacity.get(d) ?? 0, opacity.get(d + 1) ?? 0));
     });
 
-    // ── Cleanup ────────────────────────────────────────────────────────────────
+    // ── Camera: restore on resize, otherwise open on the core ─────────────────
+
+    flyToRef.current = (year: number) => {
+      svg.transition().duration(800).ease(d3.easeCubicInOut)
+        .call(zoom.transform, transformFor(year, 1));
+    };
+
+    const initial = transformRef.current ?? transformFor(CENTER_YEAR, 1);
+    svg.call(zoom.transform, initial); // fires the zoom handler → sets transform + regen
+
+    // ── Cleanup ───────────────────────────────────────────────────────────────
 
     return () => {
-      expandRef.current = null;
-      clearTimeout(restoreTimeout);
-      driftTimer.stop();
-      simulation.stop();
+      flyToRef.current = null;
+      fadeTimer.stop();
       svg.on('.zoom', null);
     };
 
-    // dimsRef is a stable ref from useContainerDims; onSelectRef is always current
-  }, [years, links, visitedYears, renderKey, dimsRef]);
+    // dimsRef is stable; visited/onSelect are read through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderKey]);
 
-  // ── Expansion trigger ───────────────────────────────────────────────────────
-  // Runs when the map mounts after a visit (and whenever a different year is
-  // visited). Deferred slightly so the growth animation plays against the
-  // final scene — on mount the dims effect bumps renderKey, which rebuilds
-  // the D3 scene once more right after the first build.
+  // Fly the camera to the most recently visited year (e.g. when returning to
+  // the map after viewing a year) — the world is fixed, only the camera moves.
   useEffect(() => {
-    if (lastVisitedYear === null) return;
-    const t = window.setTimeout(() => expandRef.current?.(lastVisitedYear), 80);
-    return () => clearTimeout(t);
+    if (lastVisitedYear !== null) flyToRef.current?.(lastVisitedYear);
   }, [lastVisitedYear]);
 
   // ── JSX ─────────────────────────────────────────────────────────────────────
@@ -662,7 +439,7 @@ export default function YearMap({ years, links, visitedYears, lastVisitedYear, o
       <svg
         ref={svgRef}
         style={{ display: 'block', width: '100%', height: '100%' }}
-        aria-label="Map of explorable years — select a year to view its events"
+        aria-label="Infinite map of explorable years — pan or zoom to roam, select a year to view its events"
         role="img"
       />
     </div>
