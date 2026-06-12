@@ -63,11 +63,40 @@ const KEYFRAMES = `
 /** Years shown on the navigation map before the user has searched anything. */
 const SEED_YEARS = [1776, 1789, 1848, 1914, 1945, 1969, 1989, 2001];
 
-/** Seed nodes start connected in chronological sequence. */
-const SEED_LINKS: YearMapLink[] = SEED_YEARS.slice(1).map((year, i) => ({
-  source: SEED_YEARS[i],
-  target: year,
-}));
+/** Connect each year to its nearest two neighbours by year value. Unlike a
+ *  sequential chain this produces local clusters and loops, so the force
+ *  layout spreads outward instead of forming a line. */
+function nearestNeighbourLinks(years: number[]): YearMapLink[] {
+  const seen  = new Set<string>();
+  const links: YearMapLink[] = [];
+  for (const year of years) {
+    // Track the two closest other years in a single pass
+    let best:   number | null = null;
+    let second: number | null = null;
+    for (const other of years) {
+      if (other === year) continue;
+      if (best === null || Math.abs(other - year) < Math.abs(best - year)) {
+        second = best;
+        best   = other;
+      } else if (second === null || Math.abs(other - year) < Math.abs(second - year)) {
+        second = other;
+      }
+    }
+    for (const other of [best, second]) {
+      if (other === null) continue;
+      const a   = Math.min(year, other);
+      const b   = Math.max(year, other);
+      const key = `${a}→${b}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        links.push({ source: a, target: b });
+      }
+    }
+  }
+  return links;
+}
+
+const SEED_LINKS: YearMapLink[] = nearestNeighbourLinks(SEED_YEARS);
 
 /** The existing map year chronologically closest to `year`. */
 function nearestYear(years: number[], year: number): number {

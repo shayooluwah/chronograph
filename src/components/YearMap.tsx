@@ -9,7 +9,10 @@ const NODE_COLOR    = '#9ab0ff';
 const VISITED_COLOR = '#ffd9a0'; // warm gold — marks years already explored
 
 /** Hard cap on simulation nodes to keep the force layout cheap. */
-const MAX_NODES = 30;
+const MAX_NODES = 50;
+
+/** The map starts pushing outward on its own once this many years are visited. */
+const AUTO_EXPAND_AFTER_VISITS = 5;
 
 /** Offsets for years grown out of a visited node — deliberately not round
  *  numbers so the expansion doesn't feel artificial. */
@@ -219,8 +222,77 @@ function decorateNodeEnter(
 
 /** Stable identity for a link whether its ends are still raw year numbers or
  *  already resolved to node objects by the force simulation. */
-const endId   = (end: YearLink['source']) => (typeof end === 'object' ? end.id : end);
+const endId   = (end: YearLink['source']): number =>
+  (typeof end === 'object' ? end.id : (end as number)); // ids are always year numbers here
 const linkKey = (l: YearLink) => `${endId(l.source)}→${endId(l.target)}`;
+
+/** Among unvisited nodes adjacent to a visited one (the exploration
+ *  frontier), the oldest by year value; falls back to the oldest unvisited
+ *  node anywhere if no frontier exists yet. */
+function oldestUnvisitedNeighbour(
+  nodes:   YearNode[],
+  links:   YearLink[],
+  visited: Set<number>,
+): number | null {
+  const frontier = new Set<number>();
+  for (const l of links) {
+    const s = endId(l.source);
+    const t = endId(l.target);
+    if (visited.has(s) && !visited.has(t)) frontier.add(t);
+    if (visited.has(t) && !visited.has(s)) frontier.add(s);
+  }
+  let oldest: number | null = null;
+  for (const n of nodes) {
+    if (visited.has(n.id)) continue;
+    if (frontier.size > 0 && !frontier.has(n.id)) continue;
+    if (oldest === null || n.id < oldest) oldest = n.id;
+  }
+  return oldest;
+}
+
+/** Fixed placement angles for the three hover ghosts. */
+const GHOST_ANGLES = [-Math.PI / 2, Math.PI / 6, (5 * Math.PI) / 6];
+
+/** Dashed, label-less ghost ellipses hinting at the expansion positions
+ *  around a hovered node — only for years not already on the map. */
+function showGhostRing(
+  layer:   d3.Selection<SVGGElement, unknown, null, undefined>,
+  d:       YearNode,
+  current: YearNode[],
+  RX: number, RY: number, dist: number,
+): void {
+  const existing = new Set<number>();
+  for (const n of current) existing.add(n.id);
+
+  const px = d.renderX ?? d.x ?? 0;
+  const py = d.renderY ?? d.y ?? 0;
+
+  layer.selectAll('*').interrupt().remove();
+  EXPANSION_OFFSETS.forEach((offset, i) => {
+    const y = d.id + offset;
+    if (y === 0 || existing.has(y)) return;
+    layer.append('ellipse')
+      .attr('cx',               px + Math.cos(GHOST_ANGLES[i]) * dist)
+      .attr('cy',               py + Math.sin(GHOST_ANGLES[i]) * dist)
+      .attr('rx',               RX * 0.75)
+      .attr('ry',               RY * 0.75)
+      .attr('fill',             'none')
+      .attr('stroke',           hexToRgba(NODE_COLOR, 0.4))
+      .attr('stroke-width',     1)
+      .attr('stroke-dasharray', '4 6')
+      .attr('opacity',          0)
+      .transition().duration(180)
+      .attr('opacity', 0.7);
+  });
+}
+
+function clearGhostRing(layer: d3.Selection<SVGGElement, unknown, null, undefined>): void {
+  layer.selectAll('ellipse')
+    .interrupt()
+    .transition().duration(120)
+    .attr('opacity', 0)
+    .remove();
+}
 
 /** Expansion entry: scale 0 / opacity 0 → full over 600ms, the same
  *  easeBackOut pop as Graph.tsx's burst entry. */
@@ -235,12 +307,18 @@ function animateGrowth(enter: d3.Selection<SVGGElement, YearNode, SVGGElement, u
     .attr('transform', 'scale(1)');
 }
 
+interface GhostApi {
+  show(d: YearNode): void;
+  hide(): void;
+}
+
 /** Hover handlers shared by initial and expanded nodes. `isZooming` defers
  *  to the zoom-exit animation, which owns the ellipse while it plays. */
-function makeHoverHandlers(style: NodeStyle, isZooming: () => boolean) {
+function makeHoverHandlers(style: NodeStyle, isZooming: () => boolean, ghosts: GhostApi) {
   return {
     onPointerEnter(this: SVGGElement, _: unknown, d: YearNode) {
       if (isZooming()) return;
+      ghosts.show(d);
       d3.select(this).select('ellipse.node-body')
         .interrupt()
         .transition().duration(130).ease(d3.easeCubicOut)
@@ -249,6 +327,7 @@ function makeHoverHandlers(style: NodeStyle, isZooming: () => boolean) {
     },
     onPointerLeave(this: SVGGElement, _: unknown, d: YearNode) {
       if (isZooming()) return;
+      ghosts.hide();
       d3.select(this).select('ellipse.node-body')
         .interrupt()
         .transition().duration(130).ease(d3.easeCubicOut)
@@ -256,6 +335,30 @@ function makeHoverHandlers(style: NodeStyle, isZooming: () => boolean) {
         .attr('fill', style.baseFill(d));
     },
   };
+}
+
+/** Dims-in-a-ref + render-counter pattern (same as Graph.tsx): ResizeObserver
+ *  updates never cause React re-renders, only D3 effect re-runs via the key. */
+function useContainerDims(ref: React.RefObject<HTMLDivElement | null>) {
+  const dimsRef = useRef({ w: 0, h: 0 });
+  const [renderKey, bumpRender] = useReducer((n: number) => n + 1, 0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Eagerly capture initial size so the D3 effect fires on mount
+    dimsRef.current = { w: Math.floor(el.clientWidth), h: Math.floor(el.clientHeight) };
+    bumpRender();
+    const obs = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      dimsRef.current = { w: Math.floor(width), h: Math.floor(height) };
+      bumpRender();
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [ref]);
+
+  return { dimsRef, renderKey };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -279,24 +382,7 @@ export default function YearMap({ years, links, visitedYears, lastVisitedYear, o
   const onSelectRef = useRef(onYearSelect);
   useEffect(() => { onSelectRef.current = onYearSelect; }, [onYearSelect]);
 
-  /** Same dims-in-a-ref + render-counter pattern as Graph.tsx: ResizeObserver
-   *  updates never cause React re-renders, only D3 effect re-runs. */
-  const dimsRef = useRef({ w: 0, h: 0 });
-  const [renderKey, bumpRender] = useReducer((n: number) => n + 1, 0);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    dimsRef.current = { w: Math.floor(el.clientWidth), h: Math.floor(el.clientHeight) };
-    bumpRender();
-    const obs = new ResizeObserver(([entry]) => {
-      const { width, height } = entry.contentRect;
-      dimsRef.current = { w: Math.floor(width), h: Math.floor(height) };
-      bumpRender();
-    });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
+  const { dimsRef, renderKey } = useContainerDims(containerRef);
 
   // ── D3 render ───────────────────────────────────────────────────────────────
 
@@ -345,8 +431,9 @@ export default function YearMap({ years, links, visitedYears, lastVisitedYear, o
     let allNodes = buildNodes(sortedYears, mergedLinks, stored, w, h, cx, cy);
     let allLinks = buildSimLinks(sortedYears, mergedLinks);
 
-    const linkLayer = scene.append('g').attr('class', 'links');
-    const nodeLayer = scene.append('g').attr('class', 'nodes');
+    const linkLayer  = scene.append('g').attr('class', 'links');
+    const ghostLayer = scene.append('g').attr('class', 'ghosts').attr('pointer-events', 'none');
+    const nodeLayer  = scene.append('g').attr('class', 'nodes');
 
     const isVisited = (d: YearNode) => visitedYears.has(d.id);
     const baseFill  = (d: YearNode) =>
@@ -356,7 +443,12 @@ export default function YearMap({ years, links, visitedYears, lastVisitedYear, o
     // Set while the zoom-into-node exit animation plays; blocks hover/clicks.
     let zooming = false;
     let restoreTimeout: number | undefined;
-    const { onPointerEnter, onPointerLeave } = makeHoverHandlers(nodeStyle, () => zooming);
+
+    const ghostApi: GhostApi = {
+      show: d => showGhostRing(ghostLayer, d, allNodes, RX, RY, isMobile ? 70 : 100),
+      hide: () => clearGhostRing(ghostLayer),
+    };
+    const { onPointerEnter, onPointerLeave } = makeHoverHandlers(nodeStyle, () => zooming, ghostApi);
 
     // Reassigned by the join helpers whenever nodes are added, so the event
     // handlers and the drift timer below always operate on the full set.
@@ -429,6 +521,7 @@ export default function YearMap({ years, links, visitedYears, lastVisitedYear, o
       (ev as MouseEvent).stopPropagation();
       if (zooming) return;
       zooming = true;
+      ghostApi.hide(); // pointerleave won't fire once the map fades out
 
       // Zoom-into-node exit: the chosen node swells while everything else
       // fades, then navigation fires and the loading overlay takes over.
@@ -467,19 +560,19 @@ export default function YearMap({ years, links, visitedYears, lastVisitedYear, o
 
     // ── Dynamic expansion: grow new years out of a just-visited node ───────────
 
-    expandRef.current = (visitedYear: number) => {
-      const parent = allNodes.find(n => n.id === visitedYear);
+    function expandFrom(originYear: number) {
+      const parent = allNodes.find(n => n.id === originYear);
       if (!parent) return;
 
-      const fresh = pickExpansionYears(visitedYear, allNodes);
+      const fresh = pickExpansionYears(originYear, allNodes);
       if (fresh.length === 0) return;
 
-      // Spawn at the visited node's current position so they grow out of it
+      // Spawn at the origin node's current position so they grow out of it
       const newNodes = spawnNodesAt(fresh, parent.x ?? cx, parent.y ?? cy);
 
       allNodes = allNodes.concat(newNodes);
-      allLinks = allLinks.concat(fresh.map(y => ({ source: visitedYear, target: y })));
-      for (const y of fresh) EXPANDED_YEARS.set(y, visitedYear);
+      allLinks = allLinks.concat(fresh.map(y => ({ source: originYear, target: y })));
+      for (const y of fresh) EXPANDED_YEARS.set(y, originYear);
 
       joinLinks();
       animateGrowth(joinNodes());
@@ -488,6 +581,16 @@ export default function YearMap({ years, links, visitedYears, lastVisitedYear, o
       simulation.nodes(allNodes);
       (simulation.force('link') as d3.ForceLink<YearNode, YearLink>).links(allLinks);
       simulation.alpha(0.3).restart();
+    }
+
+    expandRef.current = (visitedYear: number) => {
+      expandFrom(visitedYear);
+      // Once the user has explored enough, the map pushes outward on its own:
+      // also grow from the oldest unexplored frontier node on each return.
+      if (visitedYears.size >= AUTO_EXPAND_AFTER_VISITS) {
+        const frontier = oldestUnvisitedNeighbour(allNodes, allLinks, visitedYears);
+        if (frontier !== null && frontier !== visitedYear) expandFrom(frontier);
+      }
     };
 
     // ── Render loop: simulation position + sine-wave drift ─────────────────────
@@ -523,7 +626,8 @@ export default function YearMap({ years, links, visitedYears, lastVisitedYear, o
       svg.on('.zoom', null);
     };
 
-  }, [years, links, visitedYears, renderKey]); // onSelectRef intentionally omitted — always current
+    // dimsRef is a stable ref from useContainerDims; onSelectRef is always current
+  }, [years, links, visitedYears, renderKey, dimsRef]);
 
   // ── Expansion trigger ───────────────────────────────────────────────────────
   // Runs when the map mounts after a visit (and whenever a different year is
