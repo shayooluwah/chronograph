@@ -17,7 +17,9 @@
       "Bash(git -C \"C:/Users/GoDAM/Documents/Chronograph\" remote -v)",
       "PowerShell(git --no-pager status 2>&1 | Out-String; \"EXIT: $LASTEXITCODE\")",
       "PowerShell(Get-Command git -All)",
-      "PowerShell($git = \"C:\\\\Program Files\\\\Git\\\\cmd\\\\git.exe\"; & $git status; echo \"---STAT---\"; & $git diff --stat; echo \"---BRANCH---\"; & $git rev-parse --abbrev-ref HEAD)"
+      "PowerShell($git = \"C:\\\\Program Files\\\\Git\\\\cmd\\\\git.exe\"; & $git status; echo \"---STAT---\"; & $git diff --stat; echo \"---BRANCH---\"; & $git rev-parse --abbrev-ref HEAD)",
+      "Bash(ls src/services)",
+      "Bash(ls src/utils)"
     ]
   }
 }
