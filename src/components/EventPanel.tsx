@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { CATEGORY_COLORS } from '../constants/categories';
 import type { HistoricalEvent, EventCategory } from '../types';
 
@@ -60,11 +60,6 @@ interface EventPanelProps {
 export default function EventPanel({ event, onClose }: EventPanelProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
-  /** Wikipedia summary fetched as a fallback when the event has no Wikidata
-   *  description. `null` = not yet resolved; '' = resolved but empty. */
-  const [wikiExtract, setWikiExtract] = useState<string | null>(null);
-  const [loadingExtract, setLoadingExtract] = useState(false);
-
   // Open / close the native dialog based on the event prop
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -76,29 +71,6 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
     }
   }, [event]);
 
-  // Fall back to a Wikipedia summary only when the Wikidata description is
-  // missing but we have a Wikipedia article to derive a page title from.
-  useEffect(() => {
-    setWikiExtract(null);
-    setLoadingExtract(false);
-
-    if (!event || event.description?.trim() || !event.wikipediaUrl) return;
-
-    const match = event.wikipediaUrl.match(/\/wiki\/(.+)$/);
-    if (!match) return;
-    const pageTitle = match[1];
-
-    let cancelled = false;
-    setLoadingExtract(true);
-    fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${pageTitle}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => { if (!cancelled) setWikiExtract(data?.extract ?? ''); })
-      .catch(() => { if (!cancelled) setWikiExtract(''); })
-      .finally(() => { if (!cancelled) setLoadingExtract(false); });
-
-    return () => { cancelled = true; };
-  }, [event]);
-
   /** Intercept the native ESC cancel so our CSS visibility transition plays first. */
   function handleCancel(e: React.SyntheticEvent<HTMLDialogElement>) {
     e.preventDefault();
@@ -107,13 +79,6 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
 
   const color    = event ? CATEGORY_COLORS[event.category] : '#b0bec5';
   const catLabel = event ? CATEGORY_LABELS[event.category] : '';
-
-  // Prefer the Wikidata description; otherwise show the Wikipedia extract,
-  // a loading hint while it is in flight, or a clear empty-state message.
-  const descriptionBody =
-    event?.description?.trim() ||
-    (loadingExtract ? 'Loading summary…'
-      : wikiExtract?.trim() || 'No summary available for this event.');
 
   return (
     <dialog
@@ -169,9 +134,10 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
             {/* Divider */}
             <div className="event-panel-divider" />
 
-            {/* Description */}
+            {/* Description — resolved upstream by the enrichment service
+                (Wikidata description → Wikipedia summary fallback). */}
             <p className="event-panel-description">
-              {descriptionBody}
+              {event.description?.trim() || 'No description available'}
             </p>
           </>
         )}

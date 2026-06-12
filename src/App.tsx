@@ -7,6 +7,7 @@ import EventPanel      from './components/EventPanel';
 import CategoryFilter  from './components/CategoryFilter';
 import { ALL_CATEGORIES } from './constants/categories';
 import { fetchYearEvents } from './api/yearApi';
+import { enrichEvents } from './services/wikidataEnrichment';
 import type { HistoricalEvent, EventCategory, YearMapLink } from './types';
 import './App.css';
 
@@ -200,7 +201,10 @@ export default function App() {
     dispatch({ type: 'SEARCH_START', year });
     try {
       const data = await fetchYearEvents(year);
-      dispatch({ type: 'SEARCH_SUCCESS', year, events: data });
+      // Resolve readable labels/descriptions/links before rendering. Enrichment
+      // never throws, but guard anyway so a bug there can't blank the year.
+      const enriched = await enrichEvents(data).catch(() => data);
+      dispatch({ type: 'SEARCH_SUCCESS', year, events: enriched });
     } catch {
       dispatch({ type: 'SEARCH_ERROR' });
     }
