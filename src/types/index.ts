@@ -54,6 +54,13 @@ export interface NodeDatum {
   finalX:       number;
   finalY:       number;
   color:        string;
+  angle:        number;   // radial angle (rad)
+  radius:       number;   // distance from centre (px)
+  anchorRight:  boolean;  // right hemisphere → label flows rightward
+  label:        string;   // truncated display text
+  labelX:       number;   // label anchor, local x offset from the node
+  labelY:       number;   // label anchor, local y offset (after de-collision)
+  nudged:       boolean;  // de-collision moved the label → draw a leader line
   pulsePhase:   number;
   pulsePeriod:  number;
 }

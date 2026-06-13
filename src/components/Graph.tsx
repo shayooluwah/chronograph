@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef } from 'react';
 import * as d3 from 'd3';
-import { CATEGORY_COLORS, CATEGORY_ORBIT } from '../constants/categories';
+import { CATEGORY_COLORS } from '../constants/categories';
 import { hexToRgba } from '../utils/colors';
 import type { GraphProps, NodeDatum } from '../types';
 
@@ -143,23 +143,66 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       .call(zoomBehaviour)
       .on('dblclick.zoom', null);
 
-    // ── Compute final node positions ──────────────────────────────────────────
+    // ── Layout: nodes on staggered concentric shells ──────────────────────────
 
-    const n       = events.length;
-    const halfMin = Math.min(w, h) / 2;
+    const n      = events.length;
+    const minDim = Math.min(w, h);
+
+    // Scale the layout to the open canvas; keep the innermost shell clear of the
+    // central year glow (radius ≈ CENTRAL_R * 1.7).
+    const SHELLS    = 3;
+    const BASE_R    = Math.max(CENTRAL_R * 1.7 + 46, 0.22 * minDim);
+    const SHELL_GAP = Math.max(isMobile ? 26 : 34, 0.045 * minDim);
+    const LABEL_FONT = isMobile ? 9 : 11;
+    const LINE_H     = LABEL_FONT + 2;     // min vertical gap between labels
+    const LABEL_PAD  = NODE_R + 8;         // node edge → label start
+    const MAX_LABEL  = 22;
+
+    const truncate = (s: string, max: number) =>
+      s.length > max ? s.slice(0, max) + '…' : s;
 
     const nodeData: NodeDatum[] = events.map((event, i) => {
       const angle = (2 * Math.PI * i) / (n || 1) - Math.PI / 2;
-      const r     = (CATEGORY_ORBIT[event.category] ?? 0.5) * halfMin;
+      const cos   = Math.cos(angle);
+      const sin   = Math.sin(angle);
+      // Cycle through shells by index so angular neighbours sit at different
+      // radii; angular order and category colour grouping are unchanged.
+      const radius = BASE_R + (i % SHELLS) * SHELL_GAP;
       return {
         event,
-        finalX:      cx + r * Math.cos(angle),
-        finalY:      cy + r * Math.sin(angle),
+        finalX:      cx + radius * cos,
+        finalY:      cy + radius * sin,
         color:       CATEGORY_COLORS[event.category],
+        angle,
+        radius,
+        anchorRight: cos >= 0,
+        label:       truncate(event.title, MAX_LABEL),
+        labelX:      cos * LABEL_PAD,      // push the label outward along its radius
+        labelY:      sin * LABEL_PAD,
+        nudged:      false,
         pulsePhase:  Math.random() * Math.PI * 2,
         pulsePeriod: (4 + Math.random() * 2) * 1000,
       };
     });
+
+    // Greedy vertical de-collision per hemisphere: sort labels by world y and
+    // push any that crowd their predecessor down by a line height, so no two
+    // labels overlap. A nudged label gets a faint leader line back to its node.
+    function deCollide(group: NodeDatum[]) {
+      group.sort((a, b) => (a.finalY + a.labelY) - (b.finalY + b.labelY));
+      let lastY = -Infinity;
+      for (const d of group) {
+        let worldY = d.finalY + d.labelY;
+        if (worldY < lastY + LINE_H) {
+          worldY   = lastY + LINE_H;
+          d.labelY = worldY - d.finalY;
+          d.nudged = true;
+        }
+        lastY = worldY;
+      }
+    }
+    deCollide(nodeData.filter(d =>  d.anchorRight));
+    deCollide(nodeData.filter(d => !d.anchorRight));
 
     // ── Links (spokes from centre to each node) ───────────────────────────────
 
@@ -193,18 +236,32 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       .attr('stroke-width', 1.5)
       .attr('filter',       d => `url(#glow-${d.event.category})`);
 
-    const truncate = (s: string, max: number) => s.length > max ? s.slice(0, max) + '…' : s;
+    // Faint leader line, only where de-collision nudged a label off its radius.
+    nodeGroups.filter(d => d.nudged).append('line')
+      .attr('class',          'label-leader')
+      .attr('x1', 0).attr('y1', 0)
+      .attr('x2', d => d.labelX)
+      .attr('y2', d => d.labelY)
+      .attr('stroke',         'rgba(255,255,255,0.18)')
+      .attr('stroke-width',   1)
+      .attr('pointer-events', 'none');
 
-    nodeGroups.append('text')
-      .attr('text-anchor',       'middle')
-      .attr('y',                 NODE_R + 5)
-      .attr('dominant-baseline', 'hanging')
+    // Labels anchored outward: right hemisphere flows rightward, left leftward,
+    // each vertically centred on its (possibly nudged) anchor point.
+    const labels = nodeGroups.append('text')
+      .attr('text-anchor',       d => d.anchorRight ? 'start' : 'end')
+      .attr('x',                 d => d.labelX)
+      .attr('y',                 d => d.labelY)
+      .attr('dominant-baseline', 'central')
       .attr('fill',              '#ffffff')
-      .attr('font-size',         '9px')
+      .attr('font-size',         `${LABEL_FONT}px`)
       .attr('font-family',       'system-ui, sans-serif')
-      .attr('pointer-events',    'none')
       .attr('filter',            'url(#text-shadow-graph)')
-      .text(d => truncate(d.event.title, 20));
+      .style('cursor',           'pointer')
+      .text(d => d.label);
+
+    // Full untruncated name on hover (native tooltip), alongside the custom one.
+    labels.append('title').text(d => d.event.title);
 
     // ── Central node ─────────────────────────────────────────────────────────
 
