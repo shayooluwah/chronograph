@@ -1,0 +1,186 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chronograph — UI rework direction</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --parchment:#F2EAD0;
+    --parchment-deep:#EADFBC;
+    --parchment-line:#DBCFA4;
+    --ink:#241B5E;
+    --ink-soft:#5B5191;
+    --ink-faint:rgba(36,27,94,.16);
+    --c-birth:#2E7D6B; --c-death:#9C4A2E; --c-event:#B5862A; --c-org:#4A6B3A;
+    --c-pub:#6E3A6B;   --c-war:#A33A28;  --c-disc:#2C6E8F; --c-other:#7A6E55;
+    --display:'Archivo',Helvetica,Arial,sans-serif;
+    --mono:'Space Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--parchment);color:var(--ink);font-family:var(--mono);-webkit-font-smoothing:antialiased}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.5;
+    background-image:radial-gradient(var(--parchment-line) .5px,transparent .5px);background-size:7px 7px;mix-blend-mode:multiply}
+  .wrap{position:relative;z-index:1}
+  .screen{min-height:100vh;display:flex;flex-direction:column;border-bottom:1px dashed var(--ink-faint);position:relative}
+  .tag{position:absolute;top:18px;left:24px;font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-soft);z-index:5}
+
+  .mark-spin{transform-origin:100px 100px;animation:spin 11s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){.mark-spin{animation:none}}
+
+  /* heavy grotesk display — Tres Mares confidence */
+  .display{font-family:var(--display);font-weight:900;letter-spacing:-.045em;line-height:.85;text-transform:lowercase}
+
+  /* 1. LOADING */
+  #load{align-items:center;justify-content:center;text-align:center}
+  #load .mark{width:138px;height:138px}
+  #load .name{font-family:var(--display);font-weight:900;letter-spacing:-.05em;line-height:.82;
+    font-size:clamp(52px,12vw,150px);margin-top:20px}
+  #load .sub{font-family:var(--mono);font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:var(--ink-soft);margin-top:18px;padding-left:.4em}
+  .dots::after{content:"";animation:dots 1.6s steps(4,end) infinite}
+  @keyframes dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+
+  /* 2. APP */
+  .topbar{display:flex;align-items:center;gap:18px;padding:22px 28px 8px}
+  .brand{display:flex;align-items:center;gap:12px;flex:0 0 auto}
+  .brand .mini{width:40px;height:40px}
+  .brand .label{font-family:var(--display);font-weight:800;letter-spacing:-.05em;font-size:27px;text-transform:lowercase;line-height:.9}
+  .search{flex:1;display:flex;align-items:center;gap:10px;border:1px solid var(--ink);border-radius:2px;background:transparent;padding:11px 16px}
+  .search input{border:0;background:transparent;font-family:var(--mono);font-size:14px;color:var(--ink);width:100%;outline:none}
+  .search input::placeholder{color:var(--ink-soft)}
+  .search .go{font-family:var(--display);font-weight:800;font-size:18px}
+  .filters{display:flex;flex-wrap:wrap;gap:8px;padding:10px 28px 0}
+  .pill{font-family:var(--mono);font-size:12px;letter-spacing:.03em;border:1px solid var(--ink-faint);color:var(--ink-soft);
+    padding:6px 14px;border-radius:999px;display:flex;align-items:center;gap:7px;background:transparent}
+  .pill.on{color:var(--ink);border-color:var(--ink)}
+  .pill .swatch{width:8px;height:8px;border-radius:50%}
+  .pill.all{font-weight:700;color:var(--ink);border-color:var(--ink)}
+  .stage{flex:1;position:relative;min-height:560px}
+  .stage svg{display:block;width:100%;height:100%}
+  .node-label{font-family:var(--mono);font-size:11.5px;fill:var(--ink)}
+  .yr-num{font-family:var(--display);font-weight:900;letter-spacing:-.04em}
+  .ring{fill:none;stroke:var(--ink-faint)}
+  .tick{stroke:var(--ink-faint)}
+  .spoke{stroke:var(--ink-faint);stroke-width:.6}
+
+  /* 3. MAP */
+  #map .inner{padding:60px 28px 80px;max-width:980px;margin:auto;width:100%}
+  #map h2{font-size:clamp(46px,8vw,92px)}
+  #map p{font-family:var(--mono);color:var(--ink-soft);font-size:13px;max-width:540px;margin:22px 0 30px;line-height:1.75}
+  .spiral-yr{font-family:var(--display);font-weight:700;fill:var(--ink)}
+
+  /* 4. SYSTEM */
+  #sys{padding:56px 28px 80px}
+  #sys h2{font-size:clamp(40px,7vw,72px);margin-bottom:32px}
+  .sys-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:34px}
+  .swatches{display:flex;flex-wrap:wrap;gap:9px}
+  .sw{width:54px;height:54px;border-radius:3px;border:1px solid var(--ink-faint);display:flex;align-items:flex-end;justify-content:center;padding-bottom:3px}
+  .sw span{font-family:var(--mono);font-size:9px;background:var(--parchment);padding:1px 3px;border-radius:2px}
+  .type-row{margin-bottom:20px}
+  .type-row .big{font-family:var(--display);font-weight:900;letter-spacing:-.04em;font-size:40px;line-height:.9;text-transform:lowercase}
+  .type-row .mn{font-family:var(--mono);font-size:14px;letter-spacing:.03em}
+  .type-row small{display:block;font-family:var(--mono);color:var(--ink-soft);font-size:10px;letter-spacing:.16em;text-transform:uppercase;margin-top:8px}
+  .note{font-family:var(--mono);color:var(--ink-soft);font-size:12px;line-height:1.75;max-width:430px}
+  .note b{color:var(--ink);font-weight:700}
+</style>
+
+<div class="wrap">
+
+  <section class="screen" id="load">
+    <span class="tag">Loading screen</span>
+    <svg class="mark" viewBox="0 0 200 200" role="img" aria-label="Chronograph loading mark">
+      <circle cx="100" cy="100" r="80" class="ring" stroke="var(--ink)" stroke-width="1.1" opacity=".8"></circle>
+      <g class="mark-spin">
+        <path id="spiralPath" fill="none" stroke="var(--ink)" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <circle id="spiralEnd" r="5" fill="var(--ink)"></circle>
+        <circle cx="100" cy="100" r="2.6" fill="var(--ink)"></circle>
+      </g>
+    </svg>
+    <div class="name">chronograph</div>
+    <div class="sub">charting the year<span class="dots"></span></div>
+  </section>
+
+  <section class="screen" id="app">
+    <span class="tag">Year view · 1914</span>
+    <div class="topbar">
+      <div class="brand">
+        <svg class="mini" viewBox="0 0 200 200" aria-hidden="true">
+          <circle cx="100" cy="100" r="84" fill="none" stroke="var(--ink)" stroke-width="3"></circle>
+          <path id="spiralMini" fill="none" stroke="var(--ink)" stroke-width="9" stroke-linecap="round"></path>
+          <circle id="spiralMiniEnd" r="9" fill="var(--ink)"></circle>
+        </svg>
+        <span class="label">chronograph</span>
+      </div>
+      <div class="search">
+        <input value="" placeholder="Enter a year, e.g. 1754" readonly>
+        <span class="go">&rarr;</span>
+      </div>
+    </div>
+    <div class="filters" id="filters"></div>
+    <div class="stage"><svg id="astro" viewBox="0 0 1100 620" preserveAspectRatio="xMidYMid meet"></svg></div>
+  </section>
+
+  <section class="screen" id="map">
+    <span class="tag">Year map</span>
+    <div class="inner">
+      <h2 class="display">an orbital<br>chronology</h2>
+      <p>The infinite year-map drawn as an ink spiral on parchment — pan in any direction and new years wind into view. Earlier years spiral one way from the core, later years the other.</p>
+      <svg viewBox="0 0 760 440" style="width:100%;max-width:760px"><g id="spiralMap"></g></svg>
+    </div>
+  </section>
+
+  <section id="sys">
+    <h2 class="display">the system</h2>
+    <div class="sys-grid">
+      <div>
+        <div class="type-row"><div class="big">1914 · drive to grow</div><small>Archivo 900 · display, year, headers</small></div>
+        <div class="type-row"><div class="mn">Archduke Franz Ferdinand · b. 1863</div><small>Space Mono · data, labels, body</small></div>
+        <p class="note" style="margin-top:6px"><b>One voice, set loud.</b> Heavy grotesk carries every headline at scale; mono handles the record. The script is gone — if you want a touch of warmth back, it can return on the wordmark only.</p>
+      </div>
+      <div>
+        <div class="swatches" id="swatches"></div>
+        <p class="note" style="margin-top:14px">Parchment ground, deep indigo as the structural ink, and a set of aged map-inks for categories — desaturated so they read like an old chart, not a dashboard.</p>
+      </div>
+      <div>
+        <p class="note"><b>Signature:</b> the year view is an astrolabe — concentric hairline rings, clock ticks, the year set huge in the centre, events as ink circles on staggered orbits so the names never collide. The loading mark is that same instrument in miniature, slowly turning.</p>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+function spiral(cx,cy,b,turns,steps){const tmax=turns*Math.PI,pts=[];for(let i=0;i<=steps;i++){const t=tmax*i/steps,r=b*t;pts.push([cx+r*Math.cos(t),cy+r*Math.sin(t)]);}return pts;}
+function pathFrom(p){return 'M '+p.map(q=>q[0].toFixed(1)+' '+q[1].toFixed(1)).join(' L ');}
+(function(){
+  const s=spiral(100,100,3.9,5,160);document.getElementById('spiralPath').setAttribute('d',pathFrom(s));
+  const e=s[s.length-1];document.getElementById('spiralEnd').setAttribute('cx',e[0]);document.getElementById('spiralEnd').setAttribute('cy',e[1]);
+  const m=spiral(100,100,3.4,4.2,120);document.getElementById('spiralMini').setAttribute('d',pathFrom(m));
+  const me=m[m.length-1];document.getElementById('spiralMiniEnd').setAttribute('cx',me[0]);document.getElementById('spiralMiniEnd').setAttribute('cy',me[1]);
+})();
+const CATS=[['Births','--c-birth'],['Deaths','--c-death'],['Events','--c-event'],['Organizations','--c-org'],['Publications','--c-pub'],['Wars','--c-war'],['Discoveries','--c-disc'],['Other','--c-other']];
+const cv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+document.getElementById('filters').innerHTML='<span class="pill all">All</span>'+CATS.map((c,i)=>`<span class="pill ${i<5?'on':''}"><span class="swatch" style="background:${cv(c[1])}"></span>${c[0]}</span>`).join('');
+document.getElementById('swatches').innerHTML=[['--parchment','paper'],['--ink','ink'],['--ink-soft','soft']].concat(CATS.map(c=>[c[1],c[0].slice(0,4).toLowerCase()])).map(([v,l])=>`<div class="sw" style="background:${cv(v)}"><span>${l}</span></div>`).join('');
+const events=[['Archduke Franz Ferdinand',5],['World War I begins',5],['Panama Canal opens',2],['Battle of the Marne',5],['Cape Cod Canal',3],['Charlie Chaplin debut',2],['Federal Reserve note',3],['Babe Ruth debuts',2],['Joe DiMaggio',0],['Alec Guinness',0],['Norman Borlaug',0],['George Reeves',0],['Jonas Salk',0],['Marguerite Duras',0],['John Muir',1],['Paul von Heyse',1],['Christian de Wet',1],['Adolphe Willette',1],['Tropical Trout sp.',6],['Quantum theory paper',4],['Pygmalion',4],['Tarzan of the Apes',4],['ASCAP founded',3],['Royal Mint Refinery',3],['Audubon Society',3],['Mother\u2019s Day',2],['First red traffic light',6],['Ford assembly line',6]];
+const A=document.getElementById('astro'),CX=550,CY=305,NS='http://www.w3.org/2000/svg';
+function el(t,a){const n=document.createElementNS(NS,t);for(const k in a)n.setAttribute(k,a[k]);return n;}
+[150,210,265].forEach(r=>A.appendChild(el('circle',{cx:CX,cy:CY,r,class:'ring','stroke-dasharray':r===210?'2 6':'none'})));
+for(let i=0;i<72;i++){const a=i/72*2*Math.PI,r1=292,r2=i%6===0?276:284;A.appendChild(el('line',{x1:CX+r1*Math.cos(a),y1:CY+r1*Math.sin(a),x2:CX+r2*Math.cos(a),y2:CY+r2*Math.sin(a),class:'tick'}));}
+A.appendChild(el('circle',{cx:CX,cy:CY,r:300,class:'ring','stroke-width':1.2}));
+const yr=el('text',{x:CX,y:CY+4,'text-anchor':'middle','dominant-baseline':'middle',class:'yr-num',fill:cv('--ink')});yr.setAttribute('font-size','118');yr.textContent='1914';A.appendChild(yr);
+const N=events.length,shells=[156,196,236];
+events.forEach((ev,i)=>{const ang=(i/N)*2*Math.PI-Math.PI/2,r=shells[i%3],x=CX+r*Math.cos(ang),y=CY+r*Math.sin(ang),col=cv(CATS[ev[1]][1]);
+  A.appendChild(el('line',{x1:CX,y1:CY,x2:x,y2:y,class:'spoke'}));
+  A.appendChild(el('circle',{cx:x,cy:y,r:7.5,fill:col,stroke:cv('--parchment'),'stroke-width':1.5}));
+  const right=Math.cos(ang)>=-0.01,lx=x+(right?13:-13);
+  const lab=el('text',{x:lx,y:y+4,'text-anchor':right?'start':'end',class:'node-label'});
+  let name=ev[0];if(name.length>20)name=name.slice(0,19)+'\u2026';lab.textContent=name;A.appendChild(lab);});
+const SM=document.getElementById('spiralMap'),mx=380,my=220,ms=spiral(mx,my,11,4.6,90);
+SM.appendChild(el('path',{d:pathFrom(ms),fill:'none',stroke:cv('--ink-faint'),'stroke-width':1.2}));
+[1789,1800,1816,1848,1900,1914,1945,1969,1989,2001,1776,1925,1957].forEach((y,i)=>{const p=ms[Math.min(ms.length-1,6+i*6)],focus=(y===1914||y===1969||y===1789);
+  SM.appendChild(el('circle',{cx:p[0],cy:p[1],r:focus?13:9,fill:focus?cv('--ink'):'none',stroke:cv('--ink'),'stroke-width':1.4}));
+  const t=el('text',{x:p[0],y:p[1]+(focus?5:-15),'text-anchor':'middle',class:'spiral-yr',fill:focus?cv('--parchment'):cv('--ink')});t.setAttribute('font-size',focus?'14':'12');t.textContent=y;SM.appendChild(t);});
+</script>

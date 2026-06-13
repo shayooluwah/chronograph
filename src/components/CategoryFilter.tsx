@@ -1,4 +1,5 @@
 import { FILTER_CATEGORIES } from '../constants/categories';
+import { categoryColor } from '../utils/colors';
 import type { EventCategory } from '../types';
 
 // Re-export constants from the shared module so callers can use one import.
@@ -52,7 +53,7 @@ export default function CategoryFilter({ active, onChange }: CategoryFilterProps
       <div className="filter-separator" aria-hidden="true" />
 
       {/* One pill per category */}
-      {FILTER_CATEGORIES.map(({ id, label, color }) => {
+      {FILTER_CATEGORIES.map(({ id, label }) => {
         const on = active.has(id);
         return (
           <button
@@ -63,7 +64,7 @@ export default function CategoryFilter({ active, onChange }: CategoryFilterProps
             aria-pressed={on}
             aria-label={`${on ? 'Hide' : 'Show'} ${label}`}
             data-active={on ? 'true' : 'false'}
-            style={{ '--pill-color': color } as React.CSSProperties}
+            style={{ '--pill-color': categoryColor(id) } as React.CSSProperties}
           >
             <span className="filter-dot" aria-hidden="true" />
             {label}

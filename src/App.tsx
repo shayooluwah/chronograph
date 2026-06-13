@@ -1,63 +1,17 @@
 import { useReducer } from 'react';
-import SpaceBackground from './components/SpaceBackground';
 import SearchBar       from './components/SearchBar';
 import YearMap         from './components/YearMap';
 import Graph           from './components/Graph';
 import EventPanel      from './components/EventPanel';
 import CategoryFilter  from './components/CategoryFilter';
+import SpiralMark      from './components/SpiralMark';
+import Backdrop        from './components/Backdrop';
+import ThemeToggle     from './components/ThemeToggle';
 import { ALL_CATEGORIES } from './constants/categories';
 import { fetchYearEvents } from './api/yearApi';
 import { enrichEvents } from './services/wikidataEnrichment';
 import type { HistoricalEvent, EventCategory } from './types';
 import './App.css';
-
-// ── Loading animation data ────────────────────────────────────────────────────
-
-const PARTICLE_RADIUS = 195;
-
-/** Deterministic particle data (no Math.random in render). */
-const PARTICLES = Array.from({ length: 10 }, (_, i) => {
-  const angle       = (2 * Math.PI * i) / 10 - Math.PI / 2;
-  const radiusScale = 0.78 + ((i * 6271) % 44) / 100;
-  const r           = PARTICLE_RADIUS * radiusScale;
-  return {
-    dx:       Math.round(Math.cos(angle) * r),
-    dy:       Math.round(Math.sin(angle) * r),
-    delay:    +((i * 0.17).toFixed(2)),
-    duration: +(1.55 + (i % 3) * 0.2).toFixed(2),
-    size:     `${2 + (i % 3)}px`,
-    color:    (['#c8d8ff', '#ffffff', '#d8c8ff'] as const)[i % 3],
-  };
-});
-
-const PULSE_RINGS = [
-  { delay: 0.0, diameter: '80px', color: 'rgba(150,180,255,0.40)' },
-  { delay: 0.7, diameter: '54px', color: 'rgba(210,190,255,0.32)' },
-  { delay: 1.4, diameter: '36px', color: 'rgba(255,255,255,0.25)'  },
-];
-
-// ── CSS keyframes ─────────────────────────────────────────────────────────────
-
-const KEYFRAMES = `
-  @keyframes chrono-pulse-ring {
-    0%   { transform: scale(0.45); opacity: 1; }
-    100% { transform: scale(3.2);  opacity: 0; }
-  }
-  @keyframes chrono-particle {
-    0%   { transform: translate(var(--dx), var(--dy)) scale(1.6); opacity: 0;    }
-    10%  { opacity: 1; }
-    82%  { opacity: 0.65; }
-    100% { transform: translate(0px, 0px) scale(0);              opacity: 0;    }
-  }
-  @keyframes chrono-text-breathe {
-    0%, 100% { opacity: 0.55; }
-    50%      { opacity: 1;    }
-  }
-  @keyframes chrono-slide-up {
-    from { opacity: 0; transform: translateX(-50%) translateY(6px); }
-    to   { opacity: 1; transform: translateX(-50%) translateY(0);   }
-  }
-`;
 
 // ── State / reducer ───────────────────────────────────────────────────────────
 
@@ -159,15 +113,19 @@ export default function App() {
 
   return (
     <>
-      <style>{KEYFRAMES}</style>
+      {/* Theme-swapped texture (stars in dark, paper grain in light), behind all */}
+      <Backdrop />
 
-      {/* Persistent starfield */}
-      <SpaceBackground />
+      {/* Dark / Light theme toggle, top-right */}
+      <ThemeToggle />
 
       {/* yearMap view — entry / navigation layer */}
       {!isDetail && (
         <>
-          <h1 className="chrono-brand">ChronoGraph</h1>
+          <div className="chrono-brand">
+            <SpiralMark variant="mini" className="chrono-brand-mark" />
+            <span className="chrono-brand-label display">chronograph</span>
+          </div>
           <YearMap
             visitedYears={visitedYears}
             lastVisitedYear={lastVisitedYear}
@@ -183,7 +141,7 @@ export default function App() {
           className="chrono-back-btn"
           onClick={() => dispatch({ type: 'SHOW_MAP' })}
         >
-          ← Map
+          ← map
         </button>
       )}
 
@@ -202,7 +160,7 @@ export default function App() {
         />
       )}
 
-      {/* yearDetail view — radial event graph for the selected year */}
+      {/* yearDetail view — radial astrolabe for the selected year */}
       {isDetail && selectedYear !== null && (
         <div className="graph-container">
           <Graph
@@ -219,49 +177,19 @@ export default function App() {
         onClose={() => dispatch({ type: 'SELECT_EVENT', event: null })}
       />
 
-      {/* Loading overlay — only for the yearMap → yearDetail transition;
+      {/* Loading screen — only for the yearMap → yearDetail transition;
           navigating around the map itself never shows it */}
       {loading && pendingYear !== null && (
         <output
           className="chrono-loading"
           aria-label={`Loading data for ${pendingYear ?? 'that year'}`}
         >
-          {/* Burst origin */}
-          <div className="chrono-burst">
-
-            {PULSE_RINGS.map((ring, i) => (
-              <div
-                key={i}
-                className="chrono-pulse-ring"
-                style={{
-                  '--diameter':   ring.diameter,
-                  '--ring-color': ring.color,
-                  animation: `chrono-pulse-ring 2.4s ${ring.delay}s ease-out infinite`,
-                } as React.CSSProperties}
-              />
-            ))}
-
-            <div className="chrono-orb" aria-hidden="true" />
-
-            {PARTICLES.map((p, i) => (
-              <div
-                key={i}
-                className="chrono-particle"
-                aria-hidden="true"
-                style={{
-                  '--size':  p.size,
-                  '--color': p.color,
-                  '--dx':    `${p.dx}px`,
-                  '--dy':    `${p.dy}px`,
-                  animation: `chrono-particle ${p.duration}s ${p.delay}s ease-in infinite`,
-                } as React.CSSProperties}
-              />
-            ))}
+          <Backdrop />
+          <SpiralMark variant="loader" className="chrono-loading-mark" />
+          <div className="chrono-loading-name display">chronograph</div>
+          <div className="chrono-loading-sub">
+            charting {pendingYear ?? 'the year'}<span className="chrono-dots" aria-hidden="true" />
           </div>
-
-          <p className="chrono-status-text">
-            Travelling to {pendingYear ?? '…'}
-          </p>
         </output>
       )}
 

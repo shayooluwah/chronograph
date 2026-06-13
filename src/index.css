@@ -1,3 +1,101 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ── Semantic theme tokens — dark default + light alternative ────────────────── */
+
+:root,
+:root[data-theme="dark"] {
+  --bg:        #1E1A40; /* twilight ground */
+  --surface:   #2A2658; /* raised surfaces, EventPanel */
+  --text:      #F2EAD0; /* all primary text + structure */
+  --text-soft: #C7BC99; /* secondary text */
+  --line:      rgba(242, 234, 208, 0.16); /* hairlines, rings, spokes */
+
+  --c-birth: #4FC7A6;
+  --c-death: #DB7C53;
+  --c-event: #E6B84D;
+  --c-org:   #88BC6B;
+  --c-pub:   #B380B3;
+  --c-war:   #E2664F;
+  --c-disc:  #5FA9CE;
+  --c-other: #C2B488;
+}
+
+:root[data-theme="light"] {
+  --bg:        #F2EAD0; /* parchment ground */
+  --surface:   #EADFBC;
+  --text:      #241B5E; /* deep indigo ink */
+  --text-soft: #5B5191;
+  --line:      rgba(36, 27, 94, 0.16);
+
+  --c-birth: #2E7D6B;
+  --c-death: #9C4A2E;
+  --c-event: #B5862A;
+  --c-org:   #4A6B3A;
+  --c-pub:   #6E3A6B;
+  --c-war:   #A33A28;
+  --c-disc:  #2C6E8F;
+  --c-other: #7A6E55;
+}
+
+:root {
+  --display: 'Archivo', Helvetica, Arial, sans-serif;
+  --mono:    'Space Mono', ui-monospace, monospace;
+
+  /* Optional warmth hook — to bring back a script wordmark, add
+     family=Parisienne to the Google Fonts link in index.html and apply
+     var(--script) to .chrono-brand-label only. --script: 'Parisienne', cursive; */
+}
+
+/* ── Global ground ─────────────────────────────────────────────────────────── */
+
+html,
+body,
+#root {
+  height:      100%;
+  width:       100%;
+  overflow:    hidden; /* pan/zoom handled by D3 */
+  background:  var(--bg);
+  color:       var(--text);
+  font-family: var(--mono);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+/* ── Texture layers — swapped per theme, behind all content, decorative ──────── */
+
+.stars {
+  position:       fixed;
+  inset:          0;
+  z-index:        0;
+  display:        block;
+  pointer-events: none;
+}
+
+.grain {
+  position:         fixed;
+  inset:            0;
+  z-index:          0;
+  display:          none; /* light theme switches this on */
+  pointer-events:   none;
+  opacity:          0.5;
+  mix-blend-mode:   multiply;
+  background-image: radial-gradient(#DBCFA4 .5px, transparent .5px);
+  background-size:  7px 7px;
+}
+
+:root[data-theme="light"] .stars { display: none; }
+:root[data-theme="light"] .grain { display: block; }
+
+/* Heavy grotesk display voice — headlines, year, wordmark */
+.display {
+  font-family:    var(--display);
+  font-weight:    900;
+  letter-spacing: -0.045em;
+  line-height:    0.85;
+  text-transform: lowercase;
+}

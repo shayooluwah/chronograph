@@ -1,7 +1,11 @@
-/** Convert a 6-digit hex colour string to `rgba(r,g,b,alpha)`. */
-export function hexToRgba(hex: string, alpha: number): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
+import { CATEGORY_VAR } from '../constants/categories';
+import type { EventCategory } from '../types';
+
+/**
+ * The single helper used everywhere a category is coloured. Returns a CSS
+ * `var(--c-*)` reference rather than a resolved value, so a dot or node painted
+ * with it follows the active theme automatically (no re-render needed).
+ */
+export function categoryColor(cat: EventCategory): string {
+  return `var(${CATEGORY_VAR[cat]})`;
 }

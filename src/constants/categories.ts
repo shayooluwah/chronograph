@@ -1,30 +1,38 @@
 import type { EventCategory } from '../types';
 
-/** Full metadata list — source of truth for filter pills and graph colours. */
-export const FILTER_CATEGORIES: {
-  id:    EventCategory;
-  label: string;
-  color: string;
-}[] = [
-  { id: 'birth',        label: 'Births',        color: '#4fc3f7' },
-  { id: 'death',        label: 'Deaths',        color: '#ef9a9a' },
-  { id: 'event',        label: 'Events',        color: '#fff176' },
-  { id: 'organization', label: 'Organizations', color: '#a5d6a7' },
-  { id: 'publication',  label: 'Publications',  color: '#ce93d8' },
-  { id: 'war',          label: 'Wars',          color: '#ff8a65' },
-  { id: 'discovery',    label: 'Discoveries',   color: '#80deea' },
-  { id: 'other',        label: 'Other',         color: '#b0bec5' },
+/**
+ * The single place the category enum is mapped to a colour. Each category
+ * points at one of the eight --c-* CSS variables, which carry per-theme values
+ * (index.css). `categoryColor()` in utils/colors.ts wraps these in `var(...)`
+ * so a colour follows the active theme automatically.
+ */
+export const CATEGORY_VAR: Record<EventCategory, string> = {
+  birth:        '--c-birth',
+  death:        '--c-death',
+  event:        '--c-event',
+  organization: '--c-org',
+  publication:  '--c-pub',
+  war:          '--c-war',
+  discovery:    '--c-disc',
+  other:        '--c-other',
+};
+
+/** Metadata for the filter pills — labels only; colour comes from categoryColor. */
+export const FILTER_CATEGORIES: { id: EventCategory; label: string }[] = [
+  { id: 'birth',        label: 'Births'        },
+  { id: 'death',        label: 'Deaths'        },
+  { id: 'event',        label: 'Events'        },
+  { id: 'organization', label: 'Organizations' },
+  { id: 'publication',  label: 'Publications'  },
+  { id: 'war',          label: 'Wars'          },
+  { id: 'discovery',    label: 'Discoveries'   },
+  { id: 'other',        label: 'Other'         },
 ];
 
 /** Full set of every category id — pass to useState to start with all active. */
 export const ALL_CATEGORIES = new Set<EventCategory>(
   FILTER_CATEGORIES.map(c => c.id),
 );
-
-/** Quick-lookup colour map derived from FILTER_CATEGORIES. */
-export const CATEGORY_COLORS: Record<EventCategory, string> = Object.fromEntries(
-  FILTER_CATEGORIES.map(c => [c.id, c.color]),
-) as Record<EventCategory, string>;
 
 /**
  * Orbital radius for each category, expressed as a fraction of half the

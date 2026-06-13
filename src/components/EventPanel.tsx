@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { CATEGORY_COLORS } from '../constants/categories';
+import { categoryColor } from '../utils/colors';
 import type { HistoricalEvent, EventCategory } from '../types';
 
 const CATEGORY_LABELS: Record<EventCategory, string> = {
@@ -77,7 +77,7 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
     onClose();
   }
 
-  const color    = event ? CATEGORY_COLORS[event.category] : '#b0bec5';
+  const color    = event ? categoryColor(event.category) : 'var(--text-soft)';
   const catLabel = event ? CATEGORY_LABELS[event.category] : '';
 
   return (

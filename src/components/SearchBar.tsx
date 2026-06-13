@@ -20,22 +20,6 @@ function parseYear(value: string): number | null {
   return n;
 }
 
-// ── Icon ─────────────────────────────────────────────────────────────────────
-
-function ArrowRightIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
-      <path
-        d="M3 7.5h9M8.5 3.5l4 4-4 4"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SearchBar({ mode, currentYear, onSearch }: SearchBarProps) {
@@ -116,7 +100,7 @@ export default function SearchBar({ mode, currentYear, onSearch }: SearchBarProp
           onClick={handleSubmit}
           aria-label="Search this year"
         >
-          {isCompact ? <ArrowRightIcon /> : 'Explore'}
+          <span aria-hidden="true">→</span>
         </button>
       </div>
 

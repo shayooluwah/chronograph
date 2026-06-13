@@ -1,12 +1,13 @@
 import { useEffect, useReducer, useRef } from 'react';
 import * as d3 from 'd3';
-import { hexToRgba } from '../utils/colors';
 import type { YearMapProps } from '../types';
 
-// ── Palette ───────────────────────────────────────────────────────────────────
+// ── Palette as live CSS-variable references — nodes follow the theme toggle ────
 
-const NODE_COLOR    = '#9ab0ff';
-const VISITED_COLOR = '#ffd9a0'; // warm gold — marks years already explored
+const TEXT = 'var(--text)';
+const BG   = 'var(--bg)';
+const LINE = 'var(--line)';
+const HOVER_WASH = 'color-mix(in srgb, var(--text) 12%, transparent)';
 
 // ── Spiral geometry ───────────────────────────────────────────────────────────
 //
@@ -59,56 +60,6 @@ function furthestCornerDistanceFromCenter(b: Bounds): number {
     for (const y of [b.minY, b.maxY]) max = Math.max(max, Math.hypot(x, y));
   }
   return max;
-}
-
-// ── Glow / shadow filters (same recipe as before) ─────────────────────────────
-
-function appendGlowFilters(svg: d3.Selection<SVGSVGElement, unknown, null, undefined>): void {
-  const defs = svg.append('defs');
-
-  ([['glow-yearmap', NODE_COLOR], ['glow-yearmap-visited', VISITED_COLOR]] as const)
-    .forEach(([id, color]) => {
-      const f = defs.append('filter')
-        .attr('id',     id)
-        .attr('x',      '-60%')
-        .attr('y',      '-60%')
-        .attr('width',  '220%')
-        .attr('height', '220%');
-
-      f.append('feGaussianBlur')
-        .attr('in',          'SourceAlpha')
-        .attr('stdDeviation', 5)
-        .attr('result',      'blurred');
-
-      f.append('feFlood')
-        .attr('flood-color',   color)
-        .attr('flood-opacity', 0.85)
-        .attr('result',        'flooded');
-
-      f.append('feComposite')
-        .attr('in',       'flooded')
-        .attr('in2',      'blurred')
-        .attr('operator', 'in')
-        .attr('result',   'coloredGlow');
-
-      const merge = f.append('feMerge');
-      merge.append('feMergeNode').attr('in', 'coloredGlow');
-      merge.append('feMergeNode').attr('in', 'SourceGraphic');
-    });
-
-  const shadow = defs.append('filter')
-    .attr('id',     'text-shadow-yearmap')
-    .attr('x',      '-20%')
-    .attr('y',      '-20%')
-    .attr('width',  '140%')
-    .attr('height', '140%');
-
-  shadow.append('feDropShadow')
-    .attr('dx',            0)
-    .attr('dy',            0)
-    .attr('stdDeviation',  3)
-    .attr('flood-color',   '#000000')
-    .attr('flood-opacity', 0.8);
 }
 
 // ── Container dims (resize → effect re-run, no React re-render) ────────────────
@@ -173,15 +124,15 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
     svg.selectAll('*').remove();
     svg.attr('width', w).attr('height', h);
 
-    appendGlowFilters(svg);
-
     const scene     = svg.append('g').attr('class', 'scene');
     const linkLayer = scene.append('g').attr('class', 'links');
     const nodeLayer = scene.append('g').attr('class', 'nodes');
 
     const isVisited = (year: number) => visitedRef.current.has(year);
-    const baseFill  = (year: number) =>
-      hexToRgba(isVisited(year) ? VISITED_COLOR : NODE_COLOR, isVisited(year) ? 0.22 : 0.16);
+    // Unvisited years read as outlines; visited/focused years fill with --text
+    // and carry --bg-coloured numerals so they stay legible in either theme.
+    const bodyFill = (year: number) => (isVisited(year) ? TEXT : 'none');
+    const textFill = (year: number) => (isVisited(year) ? BG : TEXT);
 
     // Currently mounted years (year → fixed position) and their live, lerped
     // opacity for the proximity fade.
@@ -245,7 +196,7 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
         const p    = yearToPosition(year);
         if (inBounds(p, gen, nodeMargin) && !mounted.has(year)) {
           mounted.set(year, p);
-          opacity.set(year, 0); // fade in from darkness
+          opacity.set(year, 0); // fade in as the viewport nears
         }
       }
 
@@ -279,48 +230,43 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
         .on('pointerleave', onPointerLeave)
         .on('click',        onNodeClick);
 
-      // Visited marker: soft outer ring behind the body
+      // Visited marker: faint outer ring behind the filled body
       enter.filter(d => isVisited(d)).append('ellipse')
         .attr('class',        'visited-ring')
         .attr('rx',           RX + 7)
         .attr('ry',           RY + 7)
         .attr('fill',         'none')
-        .attr('stroke',       hexToRgba(VISITED_COLOR, 0.55))
-        .attr('stroke-width', 1.5)
-        .attr('filter',       'url(#glow-yearmap-visited)');
+        .attr('stroke',       LINE)
+        .attr('stroke-width', 1);
 
       enter.append('ellipse')
         .attr('class',        'node-body')
         .attr('rx',           RX)
         .attr('ry',           RY)
-        .attr('fill',         d => baseFill(d))
-        .attr('stroke',       d => hexToRgba(isVisited(d) ? VISITED_COLOR : NODE_COLOR, 0.8))
-        .attr('stroke-width', 1.5)
-        .attr('filter',       d => isVisited(d) ? 'url(#glow-yearmap-visited)' : 'url(#glow-yearmap)');
+        .attr('fill',         d => bodyFill(d))
+        .attr('stroke',       TEXT)
+        .attr('stroke-width', 1.4);
 
       enter.append('text')
         .attr('text-anchor',       'middle')
         .attr('dominant-baseline', 'central')
-        .attr('fill',              '#ffffff')
-        .attr('font-weight',       600)
+        .attr('fill',              d => textFill(d))
+        .attr('class',             'year-node-label')
         .attr('font-size',         isMobile ? '12px' : '14px')
-        .attr('font-family',       'system-ui, sans-serif')
-        .attr('letter-spacing',    '0.5')
         .attr('pointer-events',    'none')
-        .attr('filter',            'url(#text-shadow-yearmap)')
         .text(d => String(d));
     }
 
     function joinLinks() {
-      // Edges only between mounted consecutive years (n and n+1).
+      // Hairline spiral connectors only between mounted consecutive years.
       const pairs: number[] = [];
       for (const year of mounted.keys()) if (mounted.has(year + 1)) pairs.push(year);
 
       const sel = linkLayer.selectAll<SVGLineElement, number>('line').data(pairs, d => d);
       sel.exit().remove();
       sel.enter().append('line')
-        .attr('stroke',       'rgba(154,176,255,0.22)')
-        .attr('stroke-width', 1.2)
+        .attr('stroke',       LINE)
+        .attr('stroke-width', 1.1)
         .merge(sel)
         .attr('x1', d => yearToPosition(d).x)
         .attr('y1', d => yearToPosition(d).y)
@@ -332,20 +278,22 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
 
     function onPointerEnter(this: SVGGElement, _: unknown, year: number) {
       if (navigating) return;
+      // Fill is a var()/color-mix value d3 can't interpolate — set it instantly,
+      // animate only the scale.
       d3.select(this).select('ellipse.node-body')
+        .attr('fill', isVisited(year) ? TEXT : HOVER_WASH)
         .interrupt()
         .transition().duration(130).ease(d3.easeCubicOut)
-        .attr('transform', 'scale(1.15)')
-        .attr('fill', hexToRgba(isVisited(year) ? VISITED_COLOR : NODE_COLOR, 0.34));
+        .attr('transform', 'scale(1.15)');
     }
 
     function onPointerLeave(this: SVGGElement, _: unknown, year: number) {
       if (navigating) return;
       d3.select(this).select('ellipse.node-body')
+        .attr('fill', bodyFill(year))
         .interrupt()
         .transition().duration(130).ease(d3.easeCubicOut)
-        .attr('transform', 'scale(1)')
-        .attr('fill', baseFill(year));
+        .attr('transform', 'scale(1)');
     }
 
     function onNodeClick(this: SVGGElement, ev: Event, year: number) {
@@ -378,7 +326,7 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
     }
 
     // ── Proximity fade (one timer, lerps every mounted node toward its target
-    //    opacity so years emerge from darkness as the viewport nears them) ─────
+    //    opacity so years emerge as the viewport nears them) ─────────────────
 
     const fadeTimer = d3.timer(() => {
       if (navigating) return;
