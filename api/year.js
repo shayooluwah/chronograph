@@ -1,21 +1,39 @@
 /**
  * Vercel serverless function — GET /api/year?year=1754
  *
- * Fetches up to 60 historical events from the Wikidata SPARQL endpoint,
- * normalised into the HistoricalEvent shape defined in src/types/index.ts.
+ * Fetches historical events from the Wikidata SPARQL endpoint, normalised into
+ * the HistoricalEvent shape defined in src/types/index.ts.
+ *
+ * Recall comes from querying many date predicates, not just one:
+ *   P569 date of birth · P570 date of death · P580 start time ·
+ *   P582 end time · P585 point in time · P571 inception · P577 publication date ·
+ *   P575 time of discovery / invention
+ *
+ * This is what surfaces events the old single-predicate query missed — wars and
+ * conflicts (dated by P580 start time → e.g. WWI 1914, the Nigerian Civil War
+ * 1967), country independences / foundings (P571 inception on sovereign states →
+ * e.g. the 1960 "Year of Africa"), and sporting events like the FIFA World Cup
+ * (P585 / P580 on sports competitions).
  */
 
 const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
 
-// ── SPARQL query templates ────────────────────────────────────────────────────
+// ── SPARQL query construction ─────────────────────────────────────────────────
 //
-// Performance notes (these queries previously timed out at WDQS's 60s limit):
-// - FILTER(YEAR(?d) = N) forces a scan of every statement of the property.
-//   An explicit xsd:dateTime range with `hint:Prior hint:rangeSafe true`
-//   lets Blazegraph use its range index instead.
-// - The core match is wrapped in a LIMITed subquery so the OPTIONAL Wikipedia
-//   article join and the label service only run on 15 rows, not millions.
-// Measured: births query went from >60s (timeout) to ~1s.
+// Performance notes (WDQS enforces a 60s limit; the frontend gives up at 30s):
+// - An explicit xsd:dateTime range with `hint:Prior hint:rangeSafe true` lets
+//   Blazegraph use its range index instead of scanning every statement.
+// - Each branch is a LIMITed subquery ordered by `wikibase:sitelinks` (a good
+//   notability proxy) so the most significant items surface first instead of an
+//   arbitrary slice. Without this the headline event (e.g. the World Cup) gets
+//   buried under thousands of minor ones sharing the year.
+// - Join order matters. Small, specific classes (war, sovereign state, sports
+//   competition) are cheapest entered class-first then range-checked. Huge
+//   classes (humans) must be entered via the indexed date range instead.
+// - Branches over broad date predicates with no cheap class test (publications,
+//   organizations) would time out if every candidate were sitelink-counted, so
+//   they cut the candidate set by a sitelink threshold first; organizations then
+//   apply the expensive instance-of/subclass-of path to only that small set.
 
 /** ISO dateTime for Jan 1 of a (possibly negative / BCE) year. */
 function isoYearStart(year) {
@@ -30,27 +48,76 @@ function yearBounds(year) {
 }
 
 /**
- * Builds one category query: items whose `dateProp` falls inside the year,
- * restricted to a class via `classTriple`.
- *
- * `classFirst` controls join order: large classes (humans, organizations)
- * must be entered via the indexed date range; small classes (war) are cheaper
- * to enumerate first and then range-check.
+ * One or more date triples, range-bounded to the year. A single predicate binds
+ * directly; several are UNION'd so an item matches via any of them.
  */
-function buildQuery(year, dateProp, classTriple, { classFirst = false } = {}) {
-  const [start, end] = yearBounds(year);
-  const dateMatch = `?item wdt:${dateProp} ?when. hint:Prior hint:rangeSafe true.
+function dateMatch(dateProps, start, end) {
+  const triples = dateProps.length === 1
+    ? `?item wdt:${dateProps[0]} ?when.`
+    : dateProps.map((p) => `{ ?item wdt:${p} ?when. }`).join(' UNION ');
+  return `${triples}
+      hint:Prior hint:rangeSafe true.
       FILTER("${start}"^^xsd:dateTime <= ?when && ?when < "${end}"^^xsd:dateTime)`;
+}
+
+/**
+ * Builds one UNION branch: a LIMITed, sitelink-ordered subquery that tags every
+ * row with its category via `?cat`.
+ *
+ * @param {object} branch
+ * @param {string}   branch.category    - EventCategory tag for these rows
+ * @param {string[]} branch.dateProps   - date predicates to match (P-numbers)
+ * @param {string}  [branch.classTriple]- instance/subclass restriction, if any
+ * @param {boolean} [branch.classFirst] - enter via the class (small classes)
+ * @param {boolean} [branch.nested]     - cut by sitelinks first, then class-test
+ * @param {number}  [branch.minSitelinks]- drop items below this sitelink count
+ * @param {number}   branch.limit       - rows kept from this branch
+ */
+function buildBranch(branch, start, end) {
+  const { category, dateProps, classTriple, classFirst, nested, minSitelinks, limit } = branch;
+  const date     = dateMatch(dateProps, start, end);
+  const slFilter = minSitelinks ? `FILTER(?sl >= ${minSitelinks})` : '';
+
+  // Organizations: P571 (inception) is shared by countries, places and orgs, and
+  // the org subclass path is expensive — so reduce to the most-linked inceptions
+  // first, then apply the class test to only those ~60 candidates.
+  if (nested) {
+    return `  {
+    { SELECT ?item ?sl ("${category}" AS ?cat) WHERE {
+        { SELECT DISTINCT ?item ?sl WHERE {
+            ${date}
+            ?item wikibase:sitelinks ?sl. ${slFilter}
+          } ORDER BY DESC(?sl) LIMIT 60 }
+        ${classTriple}
+      } LIMIT ${limit} }
+  }`;
+  }
+
+  // Class-first (small classes) vs date-first (huge classes, lean on the index).
   const core = classFirst
     ? `${classTriple}
-      ${dateMatch}`
-    : `${dateMatch}
-      ${classTriple}`;
+      ${date}`
+    : `${date}
+      ${classTriple ?? ''}`;
+
+  return `  {
+    { SELECT DISTINCT ?item ?sl ("${category}" AS ?cat) WHERE {
+        ${core}
+        ?item wikibase:sitelinks ?sl. ${slFilter}
+      } ORDER BY DESC(?sl) LIMIT ${limit} }
+  }`;
+}
+
+/**
+ * Assembles a group of branches into one query: their UNION, plus a single
+ * Wikipedia-article join and label/description resolution over the merged rows.
+ */
+function buildGroupQuery(year, branches) {
+  const [start, end] = yearBounds(year);
+  const union = branches.map((b) => buildBranch(b, start, end)).join('\n  UNION\n');
   return `
-SELECT ?item ?itemLabel ?description ?article WHERE {
-  { SELECT ?item WHERE {
-      ${core}
-    } LIMIT 15 }
+SELECT DISTINCT ?item ?cat ?itemLabel ?description ?article WHERE {
+${union}
   OPTIONAL { ?article schema:about ?item; schema:inLanguage "en";
              schema:isPartOf <https://en.wikipedia.org/>. }
   SERVICE wikibase:label {
@@ -60,10 +127,59 @@ SELECT ?item ?itemLabel ?description ?article WHERE {
 }`;
 }
 
-const BIRTHS_QUERY        = (year) => buildQuery(year, 'P569', '?item wdt:P31 wd:Q5.');
-const DEATHS_QUERY        = (year) => buildQuery(year, 'P570', '?item wdt:P31 wd:Q5.');
-const EVENTS_QUERY        = (year) => buildQuery(year, 'P585', '?item wdt:P31/wdt:P279* wd:Q198.', { classFirst: true });
-const ORGANIZATIONS_QUERY = (year) => buildQuery(year, 'P571', '?item wdt:P31/wdt:P279* wd:Q43229.');
+// ── Query groups ──────────────────────────────────────────────────────────────
+//
+// Each group is one physical request (kept parallel to bound wall-clock under
+// the 30s frontend timeout). Branches are grouped by cost: the sports query is
+// the slow one (~15-20s) so it runs alone; everything else is a few seconds.
+
+const Q_HUMAN = '?item wdt:P31 wd:Q5.';
+const Q_WAR   = '?item wdt:P31/wdt:P279* wd:Q198.';         // war / conflict / battle
+const Q_STATE = '?item wdt:P31/wdt:P279* wd:Q3624078.';     // sovereign state
+const Q_SPORT = '?item wdt:P31/wdt:P279* wd:Q13406554.';    // sports competition
+const Q_ORG   = '?item wdt:P31/wdt:P279* wd:Q43229.';       // organization
+
+const QUERY_GROUPS = [
+  // People — date-first (humans are far too numerous to enter class-first).
+  { branches: [
+    { category: 'birth', dateProps: ['P569'], classTriple: Q_HUMAN, limit: 12 },
+    { category: 'death', dateProps: ['P570'], classTriple: Q_HUMAN, limit: 12 },
+  ] },
+  // Conflicts (P580 start time etc.) + country/state foundings & independences
+  // (P571 inception) — both small classes, so class-first. State inceptions are
+  // tagged as Events (the "independence / founding" sense lives within Events).
+  { branches: [
+    { category: 'war',   dateProps: ['P580', 'P585', 'P582'], classTriple: Q_WAR,   classFirst: true, limit: 10 },
+    { category: 'event', dateProps: ['P571'],                 classTriple: Q_STATE, classFirst: true, limit: 12 },
+  ] },
+  // Sporting events (World Cups, Olympics, …). Isolated, and given a tight
+  // timeout: ranking by sitelinks (what surfaces the headline event over the
+  // hundreds of minor ones) is a full sort whose cost swings with how busy the
+  // sporting year was. On a heavy year it would blow the budget, so we let it
+  // bail early and degrade to "no sports this year" rather than stall the whole
+  // response — every other category is unaffected.
+  { branches: [
+    { category: 'event', dateProps: ['P585', 'P580'], classTriple: Q_SPORT, classFirst: true, minSitelinks: 8, limit: 10 },
+  ], timeoutMs: 24_000 },
+  // Creations: publications (P577) and discoveries/inventions (P575) need no
+  // class test to be meaningful; organizations (P571) use the nested strategy.
+  { branches: [
+    { category: 'publication',  dateProps: ['P577'], minSitelinks: 15, limit: 8 },
+    { category: 'discovery',    dateProps: ['P575'], limit: 6 },
+    { category: 'organization', dateProps: ['P571'], classTriple: Q_ORG, nested: true, minSitelinks: 25, limit: 8 },
+  ] },
+];
+
+/** Categories a binding's ?cat may carry; anything else falls back to 'other'. */
+const VALID_CATEGORIES = new Set([
+  'birth', 'death', 'event', 'organization', 'publication', 'war', 'discovery', 'other',
+]);
+
+/** Dedup precedence when one QID surfaces under several categories (lower wins).
+ *  'event' is the most generic, so a more specific sense always overrides it. */
+const CATEGORY_PRIORITY = {
+  war: 0, birth: 1, death: 2, organization: 3, publication: 4, discovery: 5, event: 6, other: 7,
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -80,7 +196,7 @@ function extractWikidataId(uri) {
  * Executes a single SPARQL query against the Wikidata endpoint and returns
  * the parsed JSON results object.
  */
-async function runSparqlQuery(sparql) {
+async function runSparqlQuery(sparql, timeoutMs = 28_000) {
   const url = new URL(SPARQL_ENDPOINT);
   url.searchParams.set('query', sparql);
   url.searchParams.set('format', 'json');
@@ -91,8 +207,9 @@ async function runSparqlQuery(sparql) {
       // Wikidata requests a descriptive User-Agent
       'User-Agent': 'Chronograph/1.0 (https://github.com/chronograph; contact@example.com)',
     },
-    // Fail fast instead of letting one slow query hold the whole response
-    signal: AbortSignal.timeout(25_000),
+    // Fail fast instead of letting one slow query hold the whole response. Kept
+    // under the frontend's 30s axios timeout.
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!response.ok) {
@@ -103,15 +220,18 @@ async function runSparqlQuery(sparql) {
 }
 
 /**
- * Converts a raw SPARQL result binding into a HistoricalEvent object.
+ * Converts a raw SPARQL result binding into a HistoricalEvent object. The
+ * category is read from the row's ?cat tag, set by the branch that produced it.
  *
- * @param {object} binding  - One row from results.bindings
- * @param {string} category - EventCategory label for this query
- * @param {number} year     - The requested year (integer)
+ * @param {object} binding - One row from results.bindings
+ * @param {number} year    - The requested year (integer)
  */
-function normaliseBinding(binding, category, year) {
+function normaliseBinding(binding, year) {
   const itemUri = binding.item?.value ?? '';
   const wikidataId = extractWikidataId(itemUri);
+
+  const rawCat   = binding.cat?.value ?? 'other';
+  const category = VALID_CATEGORIES.has(rawCat) ? rawCat : 'other';
 
   const articleUri = binding.article?.value ?? '';
   const wikipediaUrl = articleUri.startsWith('https://en.wikipedia.org/') ? articleUri : undefined;
@@ -128,19 +248,34 @@ function normaliseBinding(binding, category, year) {
 }
 
 /**
- * Fetches one category and returns normalised HistoricalEvent objects plus an
- * `ok` flag, so the handler can avoid CDN-caching degraded responses.
+ * Fetches one query group and returns its normalised HistoricalEvent objects
+ * plus an `ok` flag, so the handler can avoid CDN-caching degraded responses.
  */
-async function fetchCategory(query, category, year) {
+async function fetchGroup(query, year, timeoutMs) {
   try {
-    const data = await runSparqlQuery(query);
+    const data = await runSparqlQuery(query, timeoutMs);
     const bindings = data?.results?.bindings ?? [];
-    return { ok: true, items: bindings.map((b) => normaliseBinding(b, category, year)) };
+    return { ok: true, items: bindings.map((b) => normaliseBinding(b, year)) };
   } catch (err) {
     // Surface the error as a console warning but don't crash the whole response
-    console.error(`[year.js] Failed to fetch category "${category}":`, err.message);
+    console.error('[year.js] Failed to fetch a query group:', err.message);
     return { ok: false, items: [] };
   }
+}
+
+/**
+ * Dedups events by QID across all groups, keeping the most specific category
+ * when the same item arrived through more than one branch.
+ */
+function dedupeByQid(events) {
+  const byId = new Map();
+  for (const ev of events) {
+    const existing = byId.get(ev.id);
+    if (!existing || CATEGORY_PRIORITY[ev.category] < CATEGORY_PRIORITY[existing.category]) {
+      byId.set(ev.id, ev);
+    }
+  }
+  return [...byId.values()];
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -167,21 +302,20 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing or invalid "year" query parameter.' });
   }
 
-  // ── Parallel SPARQL fetches ───────────────────────────────────────────────
-  const categories = await Promise.all([
-    fetchCategory(BIRTHS_QUERY(year), 'birth', year),
-    fetchCategory(DEATHS_QUERY(year), 'death', year),
-    fetchCategory(EVENTS_QUERY(year), 'event', year),
-    fetchCategory(ORGANIZATIONS_QUERY(year), 'organization', year),
-  ]);
+  // ── Parallel SPARQL fetches (one request per group) ───────────────────────
+  const groups = await Promise.all(
+    QUERY_GROUPS.map((group) =>
+      fetchGroup(buildGroupQuery(year, group.branches), year, group.timeoutMs),
+    ),
+  );
 
-  // Merge all categories (already capped at 15 each ⇒ max 60 total)
-  const results = categories.flatMap((c) => c.items);
-  const allOk   = categories.every((c) => c.ok);
+  // Merge every group, then dedup across branches by QID.
+  const results = dedupeByQid(groups.flatMap((g) => g.items));
+  const allOk   = groups.every((g) => g.ok);
 
   // ── Cache & respond ───────────────────────────────────────────────────────
   // Only let the CDN cache complete responses; a degraded response (one or
-  // more categories failed) must not be served for the next 24 hours.
+  // more groups failed) must not be served for the next 24 hours.
   res.setHeader('Cache-Control', allOk ? 'public, max-age=86400' : 'no-store');
   return res.status(200).json(results);
 }

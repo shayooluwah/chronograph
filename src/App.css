@@ -71,16 +71,66 @@
   color:          var(--text);
 }
 
-/* ── Back-to-map button, sits in the left gap of the graph-mode search bar ────── */
+/* ── yearDetail top region — header row + filter row, stacked in normal flow ──── */
+
+.chrono-top {
+  position: fixed;
+  top:      0;
+  left:     0;
+  right:    0;
+  z-index:  100;
+  display:        flex;
+  flex-direction: column;
+  background:     var(--bg);
+}
+
+/* Header row: back + year (left) · search (middle) · theme toggle (right) */
+.chrono-detail-header {
+  display:       flex;
+  align-items:   center;
+  gap:           14px;
+  padding:       10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chrono-detail-header-left {
+  display:      flex;
+  align-items:  center;
+  gap:          12px;
+  flex-shrink:  0;
+}
+
+.chrono-detail-year {
+  font-family:    var(--display);
+  font-weight:    800;
+  letter-spacing: -0.04em;
+  font-size:      22px;
+  line-height:    1;
+  color:          var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The shared controls drop their fixed positioning inside the header so nothing
+   floats over the content or the filter row below. */
+.chrono-detail-header .chrono-back-btn,
+.chrono-detail-header .theme-toggle {
+  position: static;
+  top:      auto;
+  right:    auto;
+  left:     auto;
+}
+
+.chrono-detail-header .theme-toggle {
+  flex-shrink: 0;
+}
+
+/* ── Back-to-map button ──────────────────────────────────────────────────────── */
 
 .chrono-back-btn {
-  position:       fixed;
-  top:            11px;
-  left:           16px;
-  z-index:        110;
   display:        flex;
   align-items:    center;
   gap:            6px;
+  flex-shrink:    0;
   background:     transparent;
   border:         1px solid var(--text);
   border-radius:  2px;
@@ -141,6 +191,31 @@
   border:        1px solid var(--text);
   border-radius: 2px;
   padding:       0;
+}
+
+/* Detail view — the search lives inside the flow header, so it drops all of its
+   fixed/morphing positioning and becomes a centred, bordered field in the row. */
+.chrono-detail-header .searchbar,
+.chrono-detail-header .searchbar[data-mode="graph"] {
+  position:   static;
+  top:        auto;
+  left:       auto;
+  width:      auto;
+  max-width:  520px;
+  flex:       1 1 auto;
+  min-width:  0;
+  margin:     0 auto;
+  padding:    0;
+  background: transparent;
+  border:        none;
+  border-bottom: none;
+  transform:  none;
+}
+
+.chrono-detail-header .searchbar-input-row {
+  border:        1px solid var(--text);
+  border-radius: 2px;
+  padding:       8px 14px;
 }
 
 /* Hero text — collapses to nothing in graph/map modes (no landing in app) */
@@ -290,16 +365,15 @@
 fieldset.chrono-filter-bar {
   border:  none;
   margin:  0;
-  padding: 0;
-  position:    fixed;
-  top:         59px;
-  left:        0;
-  right:       0;
-  z-index:     90;
+  /* Sits on its own full-width row beneath the header (inside .chrono-top), and
+     scrolls horizontally on narrow viewports rather than being clipped.
+     min-width:0 defeats the <fieldset> min-content default that would otherwise
+     let the pill row push past the viewport instead of scrolling. */
+  min-width:   0;
   display:     flex;
   align-items: center;
   gap:         8px;
-  padding:     8px 24px;
+  padding:     8px 16px;
   overflow-x:  auto;
   scrollbar-width:    none;
   -ms-overflow-style: none;
@@ -647,7 +721,7 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
 
 .graph-container {
   position: fixed;
-  top:      100px;
+  top:      118px; /* clears the detail header (≈70px) + category filter row (≈48px) */
   left:     0;
   right:    0;
   bottom:   0;
@@ -696,6 +770,102 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
   max-width:     220px;
   border:        1px solid var(--text);
   white-space:   pre-wrap;
+}
+
+/* ── Zoom controls — +/− affordance, bottom-right of a zoomable stage ─────────── */
+
+.zoom-controls {
+  position:       fixed;
+  right:          16px;
+  bottom:         16px;
+  /* Below the event panel (z 50) so an open panel cleanly covers it rather than
+     the buttons floating on top; scroll / pinch zoom still works meanwhile. */
+  z-index:        40;
+  display:        flex;
+  flex-direction: column;
+  gap:            2px;
+  padding:        2px;
+  border:         1px solid var(--line);
+  border-radius:  2px;
+  background:     var(--surface);
+}
+
+.zoom-btn {
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  width:           34px;
+  height:          34px;
+  background:      transparent;
+  border:          none;
+  border-radius:   1px;
+  color:           var(--text);
+  cursor:          pointer;
+  font-family:     var(--display);
+  font-weight:     800;
+  font-size:       20px;
+  line-height:     1;
+  transition:      background-color 0.15s ease, color 0.15s ease;
+}
+
+.zoom-btn:hover {
+  background: var(--text);
+  color:      var(--bg);
+}
+
+/* ── Header control clusters (audio + theme) ─────────────────────────────────── */
+
+/* Map view — floating cluster, top-right */
+.chrono-map-controls {
+  position:    fixed;
+  top:         14px;
+  right:       16px;
+  z-index:     130;
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+}
+
+/* Detail view — cluster in the right of the flow header */
+.chrono-detail-header-right {
+  display:     flex;
+  align-items: center;
+  gap:         8px;
+  flex-shrink: 0;
+}
+
+/* Inside either cluster the theme toggle drops its own fixed positioning. */
+.chrono-map-controls .theme-toggle,
+.chrono-detail-header .theme-toggle {
+  position: static;
+  top:      auto;
+  right:    auto;
+  left:     auto;
+}
+
+/* ── Audio toggle — mute / unmute, theme-token styled (theme-independent) ─────── */
+
+.audio-toggle {
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  width:           31px;
+  height:          31px;
+  background:      transparent;
+  border:          1px solid var(--line);
+  border-radius:   2px;
+  color:           var(--text-soft);
+  cursor:          pointer;
+  transition:      background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.audio-toggle[data-on="true"] {
+  color: var(--text);
+}
+
+.audio-toggle:hover {
+  color:        var(--text);
+  border-color: var(--text);
 }
 
 /* ── Theme toggle — segmented Dark / Light control, top-right ─────────────────── */

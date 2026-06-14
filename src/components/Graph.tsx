@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { categoryColor } from '../utils/colors';
+import ZoomControls from './ZoomControls';
 import type { GraphProps, NodeDatum } from '../types';
 
 // Structural colours as live CSS-variable references, so the instrument
@@ -33,10 +34,22 @@ const truncate = (s: string) =>
 export default function Graph({ events, year, onEventSelect }: GraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
 
+  /** The live zoom behaviour, so the +/− buttons can drive the same transform
+   *  the scroll/pinch gestures use. */
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
   /** Keep the callback in a ref so the heavyweight D3 effect does NOT re-run
    *  on every parent re-render with a new arrow-function identity. */
   const onSelectRef = useRef(onEventSelect);
   useEffect(() => { onSelectRef.current = onEventSelect; }, [onEventSelect]);
+
+  /** scaleBy through the zoom behaviour so scaleExtent clamping is automatic. */
+  function handleZoom(factor: number) {
+    const svgEl = svgRef.current;
+    const zoom  = zoomRef.current;
+    if (!svgEl || !zoom) return;
+    d3.select(svgEl).transition().duration(200).call(zoom.scaleBy, factor);
+  }
 
   // ── D3 render ───────────────────────────────────────────────────────────────
 
@@ -57,6 +70,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       });
 
     svg.call(zoomBehaviour).on('dblclick.zoom', null);
+    zoomRef.current = zoomBehaviour;
 
     // ── Instrument: rings, ticks, outer ring ─────────────────────────────────
     const instrument = scene.append('g').attr('class', 'instrument');
@@ -245,13 +259,16 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
 
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (
-    <svg
-      ref={svgRef}
-      viewBox={`0 0 ${VB_W} ${VB_H}`}
-      preserveAspectRatio="xMidYMid meet"
-      style={{ display: 'block', width: '100%', height: '100%' }}
-      aria-label={`Astrolabe of historical events for ${year}`}
-      role="img"
-    />
+    <>
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${VB_W} ${VB_H}`}
+        preserveAspectRatio="xMidYMid meet"
+        style={{ display: 'block', width: '100%', height: '100%' }}
+        aria-label={`Astrolabe of historical events for ${year}`}
+        role="img"
+      />
+      <ZoomControls onZoomIn={() => handleZoom(1.3)} onZoomOut={() => handleZoom(0.77)} />
+    </>
   );
 }

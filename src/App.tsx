@@ -7,6 +7,8 @@ import CategoryFilter  from './components/CategoryFilter';
 import SpiralMark      from './components/SpiralMark';
 import Backdrop        from './components/Backdrop';
 import ThemeToggle     from './components/ThemeToggle';
+import AudioToggle     from './components/AudioToggle';
+import { useAmbientAudio } from './hooks/useAmbientAudio';
 import { ALL_CATEGORIES } from './constants/categories';
 import { fetchYearEvents } from './api/yearApi';
 import { enrichEvents } from './services/wikidataEnrichment';
@@ -85,6 +87,7 @@ const initialState: AppState = {
 
 export default function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
+  const { enabled: audioOn, toggle: toggleAudio } = useAmbientAudio();
   const {
     view, selectedYear, pendingYear, visitedYears,
     events, loading, error, selectedEvent, activeCategories,
@@ -116,59 +119,67 @@ export default function App() {
       {/* Theme-swapped texture (stars in dark, paper grain in light), behind all */}
       <Backdrop />
 
-      {/* Dark / Light theme toggle, top-right */}
-      <ThemeToggle />
-
-      {/* yearMap view — entry / navigation layer */}
+      {/* yearMap view — entry / navigation layer. Brand, theme toggle and the
+          compact search panel all float over the map. */}
       {!isDetail && (
         <>
           <div className="chrono-brand">
             <SpiralMark variant="mini" className="chrono-brand-mark" />
             <span className="chrono-brand-label display">chronograph</span>
           </div>
+          <div className="chrono-map-controls">
+            <AudioToggle enabled={audioOn} onToggle={toggleAudio} />
+            <ThemeToggle />
+          </div>
           <YearMap
             visitedYears={visitedYears}
             lastVisitedYear={lastVisitedYear}
             onYearSelect={handleSearch}
           />
+          <SearchBar mode="map" onSearch={handleSearch} />
         </>
       )}
 
-      {/* Back to the year map from the yearDetail view */}
-      {isDetail && (
-        <button
-          type="button"
-          className="chrono-back-btn"
-          onClick={() => dispatch({ type: 'SHOW_MAP' })}
-        >
-          ← map
-        </button>
-      )}
-
-      {/* Search bar — morphs map (top-right) ↔ detail (top bar) */}
-      <SearchBar
-        mode={isDetail ? 'graph' : 'map'}
-        currentYear={selectedYear ?? undefined}
-        onSearch={handleSearch}
-      />
-
-      {/* Category filter pills (yearDetail only) */}
-      {isDetail && (
-        <CategoryFilter
-          active={activeCategories}
-          onChange={categories => dispatch({ type: 'SET_CATEGORIES', categories })}
-        />
-      )}
-
-      {/* yearDetail view — radial astrolabe for the selected year */}
+      {/* yearDetail view — a real flow header (no overlapping floats): back +
+          year on the left, search in the middle, theme toggle on the right, with
+          the category filter row stacked beneath on its own full-width line. */}
       {isDetail && selectedYear !== null && (
-        <div className="graph-container">
-          <Graph
-            events={filteredEvents}
-            year={selectedYear}
-            onEventSelect={event => dispatch({ type: 'SELECT_EVENT', event })}
-          />
-        </div>
+        <>
+          <div className="chrono-top">
+            <header className="chrono-detail-header">
+              <div className="chrono-detail-header-left">
+                <button
+                  type="button"
+                  className="chrono-back-btn"
+                  onClick={() => dispatch({ type: 'SHOW_MAP' })}
+                >
+                  ← map
+                </button>
+                <span className="chrono-detail-year display">{selectedYear}</span>
+              </div>
+
+              <SearchBar mode="graph" currentYear={selectedYear} onSearch={handleSearch} />
+
+              <div className="chrono-detail-header-right">
+                <AudioToggle enabled={audioOn} onToggle={toggleAudio} />
+                <ThemeToggle />
+              </div>
+            </header>
+
+            <CategoryFilter
+              active={activeCategories}
+              onChange={categories => dispatch({ type: 'SET_CATEGORIES', categories })}
+            />
+          </div>
+
+          <div className="graph-container">
+            <Graph
+              events={filteredEvents}
+              year={selectedYear}
+              onEventSelect={event => dispatch({ type: 'SELECT_EVENT', event })}
+            />
+          </div>
+        </>
       )}
 
       {/* Event detail panel */}
@@ -188,7 +199,7 @@ export default function App() {
           <SpiralMark variant="loader" className="chrono-loading-mark" />
           <div className="chrono-loading-name display">chronograph</div>
           <div className="chrono-loading-sub">
-            charting {pendingYear ?? 'the year'}<span className="chrono-dots" aria-hidden="true" />
+            Travelling to {pendingYear ?? 'the year'}<span className="chrono-dots" aria-hidden="true" />
           </div>
         </output>
       )}

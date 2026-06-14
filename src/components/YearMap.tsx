@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef } from 'react';
 import * as d3 from 'd3';
+import ZoomControls from './ZoomControls';
 import type { YearMapProps } from '../types';
 
 // ── Palette as live CSS-variable references — nodes follow the theme toggle ────
@@ -33,8 +34,12 @@ function hashJitter(year: number, salt: number): number {
 /** Deterministic world-space position for a year. Future years spiral one
  *  angular direction, past years the other, both growing out of the same core,
  *  so consecutive years stay spatial neighbours and panning outward travels
- *  further from CENTER_YEAR. */
-export function yearToPosition(year: number): { x: number; y: number } {
+ *  further from CENTER_YEAR.
+ *
+ *  This is the canonical position used for generation, culling and hit-testing
+ *  math — the render-time orbital drift (see `yearDrift`) is layered on top of
+ *  it and never feeds back here. */
+function yearToPosition(year: number): { x: number; y: number } {
   const n     = year - CENTER_YEAR;
   const theta = n * THETA_STEP;
   const r     = R0 + RADIAL_K * Math.abs(n);
@@ -42,6 +47,26 @@ export function yearToPosition(year: number): { x: number; y: number } {
     x: r * Math.cos(theta) + hashJitter(year, 1),
     y: r * Math.sin(theta) + hashJitter(year, 2),
   };
+}
+
+/** Fractional part of a hashed year+salt — a stable pseudo-random in [0, 1). */
+function hashUnit(year: number, salt: number): number {
+  const s = Math.sin((year + 1) * (12.9898 + salt) + salt * 78.233) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+/**
+ * A tiny, deterministic orbital drift for a year node at time `t` (ms). Each
+ * year gets its own amplitude (3–6px), period (6–12s) and phase, all derived
+ * from the year, so the motion is smooth and stable across renders — nodes
+ * float gently in place rather than jittering. Purely a render offset.
+ */
+function yearDrift(year: number, t: number): { dx: number; dy: number } {
+  const amp    = 3 + hashUnit(year, 1) * 3;             // 3..6 world px
+  const period = (6 + hashUnit(year, 2) * 6) * 1000;    // 6..12 s
+  const phase  = hashUnit(year, 3) * Math.PI * 2;
+  const w      = (2 * Math.PI) / period;
+  return { dx: amp * Math.cos(t * w + phase), dy: amp * Math.sin(t * w + phase) };
 }
 
 // ── Bounds helpers ────────────────────────────────────────────────────────────
@@ -105,6 +130,18 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
    *  closes over the live zoom behaviour. */
   const flyToRef = useRef<((year: number) => void) | null>(null);
 
+  /** The live zoom behaviour, so the +/− buttons drive the same transform as
+   *  scroll / pinch. */
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
+  /** scaleBy through the zoom behaviour so its scaleExtent clamping applies. */
+  function handleZoom(factor: number) {
+    const svgEl = svgRef.current;
+    const zoom  = zoomRef.current;
+    if (!svgEl || !zoom) return;
+    d3.select(svgEl).transition().duration(200).call(zoom.scaleBy, factor);
+  }
+
   const { dimsRef, renderKey } = useContainerDims(containerRef);
 
   // ── D3 render ─────────────────────────────────────────────────────────────
@@ -119,6 +156,7 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
     const RX = isMobile ? 30 : 40; // ellipse horizontal radius
     const RY = isMobile ? 17 : 22; // ellipse vertical radius
     const nodeMargin = Math.max(RX, RY);
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
     const svg = d3.select(svgEl);
     svg.selectAll('*').remove();
@@ -155,6 +193,7 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
       });
 
     svg.call(zoom).on('dblclick.zoom', null);
+    zoomRef.current = zoom;
 
     function transformFor(year: number, k: number): d3.ZoomTransform {
       const p = yearToPosition(year);
@@ -328,13 +367,19 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
     // ── Proximity fade (one timer, lerps every mounted node toward its target
     //    opacity so years emerge as the viewport nears them) ─────────────────
 
-    const fadeTimer = d3.timer(() => {
+    const fadeTimer = d3.timer((elapsed) => {
       if (navigating) return;
       const t = transformRef.current ?? d3.zoomIdentity;
       const [centerX, centerY] = t.invert([w / 2, h / 2]);
       const b    = visibleWorldBounds();
       const visR = 0.5 * Math.min(b.maxX - b.minX, b.maxY - b.minY); // inside viewport
       const bufR = visR * (1 + BUFFER);                              // out in the buffer ring
+
+      // Render-time orbital drift: a gentle per-node offset layered on the fixed
+      // position so the map feels alive (floating in space). We move the actual
+      // <g> elements, so click hit-testing keeps following them. Disabled under
+      // reduced-motion. `yearToPosition` (generation/culling) is never touched.
+      const driftFor = (year: number) => (reduceMotion ? { dx: 0, dy: 0 } : yearDrift(year, elapsed));
 
       nodeLayer.selectAll<SVGGElement, number>('g.year-node').each(function (year) {
         const p = yearToPosition(year);
@@ -344,12 +389,20 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
           : 1 - 0.85 * ((d - visR) / (bufR - visR));
         const next = (opacity.get(year) ?? 0) + (target - (opacity.get(year) ?? 0)) * 0.15;
         opacity.set(year, next);
-        d3.select(this).attr('opacity', next);
+        const { dx, dy } = driftFor(year);
+        d3.select(this)
+          .attr('opacity', next)
+          .attr('transform', `translate(${p.x + dx},${p.y + dy})`);
       });
 
-      // Connectors fade with the dimmer of their two endpoints.
+      // Connectors fade with the dimmer of their two endpoints, and track the
+      // drifted positions of the two years they join.
       linkLayer.selectAll<SVGLineElement, number>('line')
-        .attr('opacity', d => Math.min(opacity.get(d) ?? 0, opacity.get(d + 1) ?? 0));
+        .attr('opacity', d => Math.min(opacity.get(d) ?? 0, opacity.get(d + 1) ?? 0))
+        .attr('x1', d => { const p = yearToPosition(d);     return p.x + driftFor(d).dx; })
+        .attr('y1', d => { const p = yearToPosition(d);     return p.y + driftFor(d).dy; })
+        .attr('x2', d => { const p = yearToPosition(d + 1); return p.x + driftFor(d + 1).dx; })
+        .attr('y2', d => { const p = yearToPosition(d + 1); return p.y + driftFor(d + 1).dy; });
     });
 
     // ── Camera: restore on resize, otherwise open on the core ─────────────────
@@ -366,6 +419,7 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
 
     return () => {
       flyToRef.current = null;
+      zoomRef.current  = null;
       fadeTimer.stop();
       svg.on('.zoom', null);
     };
@@ -390,6 +444,7 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
         aria-label="Infinite map of explorable years — pan or zoom to roam, select a year to view its events"
         role="img"
       />
+      <ZoomControls onZoomIn={() => handleZoom(1.3)} onZoomOut={() => handleZoom(0.77)} />
     </div>
   );
 }

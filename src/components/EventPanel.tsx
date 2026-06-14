@@ -60,22 +60,32 @@ interface EventPanelProps {
 export default function EventPanel({ event, onClose }: EventPanelProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
-  // Open / close the native dialog based on the event prop
+  // Open / close the dialog based on the event prop. We use the *non-modal*
+  // show() rather than showModal() so the astrolabe behind the panel stays
+  // interactive — clicking another node just replaces `event`, and this effect
+  // re-runs to keep the (already-open) panel showing the new selection in place,
+  // with no close-then-reopen. showModal() would make the rest of the page inert
+  // and swallow those node clicks.
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (event !== null) {
-      if (!dialog.open) dialog.showModal();
+      if (!dialog.open) dialog.show();
     } else {
       if (dialog.open)  dialog.close();
     }
   }, [event]);
 
-  /** Intercept the native ESC cancel so our CSS visibility transition plays first. */
-  function handleCancel(e: React.SyntheticEvent<HTMLDialogElement>) {
-    e.preventDefault();
-    onClose();
-  }
+  // A non-modal dialog doesn't fire the native `cancel` event, so wire Escape
+  // ourselves while the panel is open (preserves close-on-ESC).
+  useEffect(() => {
+    if (event === null) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [event, onClose]);
 
   const color    = event ? categoryColor(event.category) : 'var(--text-soft)';
   const catLabel = event ? CATEGORY_LABELS[event.category] : '';
@@ -85,7 +95,6 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
       ref={dialogRef}
       className="event-panel"
       aria-label={event?.title ?? 'Event detail'}
-      onCancel={handleCancel}
     >
       <div className="event-panel-content">
 
