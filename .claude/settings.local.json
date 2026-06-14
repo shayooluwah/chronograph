@@ -19,7 +19,16 @@
       "PowerShell(Get-Command git -All)",
       "PowerShell($git = \"C:\\\\Program Files\\\\Git\\\\cmd\\\\git.exe\"; & $git status; echo \"---STAT---\"; & $git diff --stat; echo \"---BRANCH---\"; & $git rev-parse --abbrev-ref HEAD)",
       "Bash(ls src/services)",
-      "Bash(ls src/utils)"
+      "Bash(ls src/utils)",
+      "PowerShell(git ls-files | Where-Object { $_ -notmatch \"node_modules\" })",
+      "Bash(git rm *)",
+      "PowerShell(npx tsc -b 2>&1)",
+      "Bash(curl -s -G \"https://query.wikidata.org/sparql\" --data-urlencode 'query=SELECT ?x WHERE { BIND\\(1 AS ?x\\) }' --data-urlencode 'format=json' -H \"Accept: application/sparql-results+json\" -H \"User-Agent: Chronograph/1.0 \\(test\\)\" --max-time 30)",
+      "PowerShell(node --version)",
+      "PowerShell(node ./tmp-recall-check.mjs)",
+      "PowerShell(npx eslint src 2>&1 | Select-Object -First 30; \"EXIT $LASTEXITCODE\")",
+      "PowerShell(git status 2>&1 | Out-String | Write-Output; \"=== BRANCH ===\"; \\(git branch --show-current 2>&1 | Out-String\\); \"=== REMOTE ===\"; \\(git remote -v 2>&1 | Out-String\\))",
+      "PowerShell($a = Get-ChildItem \"C:\\\\Users\\\\GoDAM\\\\Documents\\\\Chronograph\\\\public\\\\audio\" -File; $a | ForEach-Object { \"{0}  {1:N1} MB\" -f $_.Name, \\($_.Length/1MB\\) }; \"TOTAL: {0:N1} MB\" -f \\(\\($a | Measure-Object Length -Sum\\).Sum/1MB\\))"
     ]
   }
 }
