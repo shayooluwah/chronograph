@@ -71,10 +71,11 @@ function dateMatch(dateProps, start, end) {
  * @param {boolean} [branch.classFirst] - enter via the class (small classes)
  * @param {boolean} [branch.nested]     - cut by sitelinks first, then class-test
  * @param {number}  [branch.minSitelinks]- drop items below this sitelink count
+ * @param {number}  [branch.nestedLimit] - nested: high-sitelink pre-cut size (def. 60)
  * @param {number}   branch.limit       - rows kept from this branch
  */
 function buildBranch(branch, start, end) {
-  const { category, dateProps, classTriple, classFirst, nested, minSitelinks, limit } = branch;
+  const { category, dateProps, classTriple, classFirst, nested, minSitelinks, nestedLimit, limit } = branch;
   const date     = dateMatch(dateProps, start, end);
   const slFilter = minSitelinks ? `FILTER(?sl >= ${minSitelinks})` : '';
 
@@ -87,7 +88,7 @@ function buildBranch(branch, start, end) {
         { SELECT DISTINCT ?item ?sl WHERE {
             ${date}
             ?item wikibase:sitelinks ?sl. ${slFilter}
-          } ORDER BY DESC(?sl) LIMIT 60 }
+          } ORDER BY DESC(?sl) LIMIT ${nestedLimit ?? 60} }
         ${classTriple}
       } LIMIT ${limit} }
   }`;
@@ -133,24 +134,36 @@ ${union}
 // the 30s frontend timeout). Branches are grouped by cost: the sports query is
 // the slow one (~15-20s) so it runs alone; everything else is a few seconds.
 
-const Q_HUMAN = '?item wdt:P31 wd:Q5.';
-const Q_WAR   = '?item wdt:P31/wdt:P279* wd:Q198.';         // war / conflict / battle
-const Q_STATE = '?item wdt:P31/wdt:P279* wd:Q3624078.';     // sovereign state
-const Q_SPORT = '?item wdt:P31/wdt:P279* wd:Q13406554.';    // sports competition
-const Q_ORG   = '?item wdt:P31/wdt:P279* wd:Q43229.';       // organization
+const Q_HUMAN     = '?item wdt:P31 wd:Q5.';
+const Q_WAR       = '?item wdt:P31/wdt:P279* wd:Q198.';         // war / conflict / battle
+const Q_STATE     = '?item wdt:P31/wdt:P279* wd:Q3624078.';     // sovereign state
+const Q_HISTSTATE = '?item wdt:P31/wdt:P279* wd:Q3024240.';     // historical country
+const Q_SPORT     = '?item wdt:P31/wdt:P279* wd:Q13406554.';    // sports competition
+const Q_ORG       = '?item wdt:P31/wdt:P279* wd:Q43229.';       // organization
 
 const QUERY_GROUPS = [
-  // People — date-first (humans are far too numerous to enter class-first).
+  // People — date-first (humans are far too numerous to enter class-first). The
+  // P569/P570 date index makes these branches cheap (~4s), so the limit is set
+  // generously: ranking still floats the headliners up, but regionally-notable
+  // figures (e.g. Uthman dan Fodio, b.1754, ~16th by sitelinks) aren't clipped.
   { branches: [
-    { category: 'birth', dateProps: ['P569'], classTriple: Q_HUMAN, limit: 12 },
-    { category: 'death', dateProps: ['P570'], classTriple: Q_HUMAN, limit: 12 },
+    { category: 'birth', dateProps: ['P569'], classTriple: Q_HUMAN, limit: 30 },
+    { category: 'death', dateProps: ['P570'], classTriple: Q_HUMAN, limit: 30 },
   ] },
-  // Conflicts (P580 start time etc.) + country/state foundings & independences
-  // (P571 inception) — both small classes, so class-first. State inceptions are
-  // tagged as Events (the "independence / founding" sense lives within Events).
+  // Conflicts (P580 start time etc.) + country foundings & independences (P571
+  // inception) — all small classes, so class-first. Inceptions are tagged as
+  // Events (the "independence / founding" sense lives within Events). Two state
+  // classes are queried as *separate* branches, not one P31/P279* disjunction:
+  // a VALUES disjunction over the subclass path defeats the class index and the
+  // 1960 query blows out to ~21s, whereas the two branches run in ~2s + ~1s.
+  // The historical-country branch is what surfaces newly-independent states that
+  // model their independence on a transitional item rather than the modern one —
+  // e.g. 1960 Nigerian independence lives on "Federation of Nigeria" (a
+  // historical country), not the modern Nigeria item (whose P571 is 1963).
   { branches: [
-    { category: 'war',   dateProps: ['P580', 'P585', 'P582'], classTriple: Q_WAR,   classFirst: true, limit: 10 },
-    { category: 'event', dateProps: ['P571'],                 classTriple: Q_STATE, classFirst: true, limit: 12 },
+    { category: 'war',   dateProps: ['P580', 'P585', 'P582'], classTriple: Q_WAR,       classFirst: true, limit: 15 },
+    { category: 'event', dateProps: ['P571'],                 classTriple: Q_STATE,     classFirst: true, limit: 25 },
+    { category: 'event', dateProps: ['P571'],                 classTriple: Q_HISTSTATE, classFirst: true, limit: 15 },
   ] },
   // Sporting events (World Cups, Olympics, …). Isolated, and given a tight
   // timeout: ranking by sitelinks (what surfaces the headline event over the
@@ -159,14 +172,17 @@ const QUERY_GROUPS = [
   // bail early and degrade to "no sports this year" rather than stall the whole
   // response — every other category is unaffected.
   { branches: [
-    { category: 'event', dateProps: ['P585', 'P580'], classTriple: Q_SPORT, classFirst: true, minSitelinks: 8, limit: 10 },
+    { category: 'event', dateProps: ['P585', 'P580'], classTriple: Q_SPORT, classFirst: true, minSitelinks: 8, limit: 12 },
   ], timeoutMs: 24_000 },
   // Creations: publications (P577) and discoveries/inventions (P575) need no
   // class test to be meaningful; organizations (P571) use the nested strategy.
+  // Thresholds are lowered and limits raised so moderately-notable works pass
+  // (ranking still surfaces the headliners first). The org nested subquery widens
+  // its high-sitelink pre-cut to 120 so more candidates reach the class test.
   { branches: [
-    { category: 'publication',  dateProps: ['P577'], minSitelinks: 15, limit: 8 },
-    { category: 'discovery',    dateProps: ['P575'], limit: 6 },
-    { category: 'organization', dateProps: ['P571'], classTriple: Q_ORG, nested: true, minSitelinks: 25, limit: 8 },
+    { category: 'publication',  dateProps: ['P577'], minSitelinks: 8, limit: 15 },
+    { category: 'discovery',    dateProps: ['P575'], limit: 12 },
+    { category: 'organization', dateProps: ['P571'], classTriple: Q_ORG, nested: true, minSitelinks: 12, nestedLimit: 120, limit: 12 },
   ] },
 ];
 
