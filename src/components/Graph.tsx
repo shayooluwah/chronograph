@@ -83,6 +83,8 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
 
     const zoomBehaviour = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.5, 5])
+      // A tap that drifts < 10px still counts as a click, not a swallowed pan.
+      .clickDistance(10)
       .on('zoom', (e: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
         scene.attr('transform', e.transform.toString());
       });
@@ -226,10 +228,20 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
     // Full untruncated name on hover (native tooltip).
     labels.append('title').text(d => d.event.title);
 
+    // Transparent, finger-sized hit area over each small node (≈44px). Added
+    // last so it's on top and captures taps, while hover/scale still targets the
+    // first <circle> (the visible dot).
+    nodeGroups.append('circle')
+      .attr('class', 'node-hit')
+      .attr('r',     22)
+      .attr('fill',  'transparent');
+
     // ── Interactions ─────────────────────────────────────────────────────────
     const tooltipEl = document.createElement('div');
     tooltipEl.className = 'graph-tooltip';
     document.body.appendChild(tooltipEl);
+
+    let tapStart: { x: number; y: number; t: number; id: number } | null = null;
 
     nodeGroups
       .on('pointerenter', function (ev, d) {
@@ -253,9 +265,22 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
           .attr('transform', 'scale(1)');
         tooltipEl.style.opacity = '0';
       })
-      .on('click', function (ev, d) {
-        (ev as MouseEvent).stopPropagation();
-        onSelectRef.current(d.event);
+      // Selection via pointer events so a tap isn't swallowed as a pan: a tap is
+      // a pointerdown→up that barely moves and is quick (mouse and touch alike).
+      .on('pointerdown', function (ev) {
+        const e = ev as PointerEvent;
+        tapStart = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+      })
+      .on('pointerup', function (ev, d) {
+        const e = ev as PointerEvent;
+        if (!tapStart || tapStart.id !== e.pointerId) return;
+        const moved   = Math.hypot(e.clientX - tapStart.x, e.clientY - tapStart.y);
+        const elapsed = performance.now() - tapStart.t;
+        tapStart = null;
+        if (moved < 10 && elapsed < 400) {
+          e.stopPropagation(); // a confirmed tap — don't let the zoom layer react
+          onSelectRef.current(d.event);
+        }
       });
 
     // ── Gentle entry fade (respects reduced motion) ──────────────────────────
@@ -282,7 +307,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
         ref={svgRef}
         viewBox={`0 0 ${VB_W} ${VB_H}`}
         preserveAspectRatio="xMidYMid meet"
-        style={{ display: 'block', width: '100%', height: '100%' }}
+        style={{ display: 'block', width: '100%', height: '100%', touchAction: 'none' }}
         aria-label={`Astrolabe of historical events for ${year}`}
         role="img"
       />

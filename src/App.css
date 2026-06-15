@@ -43,16 +43,32 @@
   .mark-spin { animation: none; }
 }
 
-/* ── Brand (mini spiral + lowercase wordmark), top-left of the map view ───────── */
+/* ── Map header — brand (left) · search · controls (right), wraps on mobile ───── */
+
+.chrono-map-top {
+  position:    fixed;
+  top:         0;
+  left:        0;
+  right:       0;
+  z-index:     120;
+  display:     flex;
+  align-items: center;
+  flex-wrap:   wrap;
+  gap:         10px 14px;
+  padding:     14px 16px;
+  /* Decorative gaps let the map pan through; interactive children opt back in. */
+  pointer-events: none;
+}
+
+.chrono-map-top > * { pointer-events: auto; }
+
+/* ── Brand (mini spiral + wordmark) ───────────────────────────────────────────── */
 
 .chrono-brand {
-  position:    fixed;
-  top:         20px;
-  left:        24px;
-  z-index:     100;
   display:     flex;
   align-items: center;
   gap:         12px;
+  flex-shrink: 0;
   pointer-events: none;
   user-select: none;
 }
@@ -258,6 +274,35 @@
   padding:       8px 14px;
 }
 
+/* Map view — the search lives in the map header (transparent over the canvas),
+   so it drops its fixed/floating positioning and becomes a fluid bordered field.
+   It keeps its place in the row on desktop and wraps to its own row on mobile. */
+.chrono-map-top .searchbar,
+.chrono-map-top .searchbar[data-mode="map"] {
+  position:   static;
+  top:        auto;
+  left:       auto;
+  right:      auto;
+  width:      auto;
+  max-width:  300px;
+  flex:       1 1 auto;
+  min-width:  0;
+  margin:     0 auto;
+  padding:    0;
+  background: transparent;
+  border:        none;
+  border-radius: 0;
+  transform:  none;
+}
+
+/* Surface + border on the field itself so it reads over the map. */
+.chrono-map-top .searchbar-input-row {
+  border:        1px solid var(--text);
+  border-radius: 2px;
+  padding:       8px 14px;
+  background:    var(--surface);
+}
+
 /* Hero text — collapses to nothing in graph/map modes (no landing in app) */
 .searchbar-hero-wrapper {
   display:            grid;
@@ -320,11 +365,14 @@
 .searchbar-input {
   flex:        1;
   min-width:   0;
+  width:       100%;
+  box-sizing:  border-box;
   background:  transparent;
   border:      none;
   color:       var(--text);
   font-family: var(--mono);
-  font-size:   14px;
+  /* Fluid so the field never overflows its row at any width */
+  font-size:   clamp(13px, 3.2vw, 15px);
 }
 
 .searchbar-input::placeholder {
@@ -831,6 +879,22 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
   letter-spacing: 0.01em;
 }
 
+/* Year-map connectors — a faint dash drifting along each line, so the network
+   reads as a living constellation. One CSS animation class for performance
+   across many connectors; opacity stays JS-driven (proximity fade). */
+.year-link {
+  stroke-dasharray:  3 9;
+  animation:         chrono-link-drift 6s linear infinite;
+}
+
+@keyframes chrono-link-drift {
+  to { stroke-dashoffset: -24; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .year-link { animation: none; stroke-dasharray: none; }
+}
+
 /* ── Graph tooltip — created imperatively in Graph.tsx ───────────────────────── */
 
 .graph-tooltip {
@@ -894,15 +958,12 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
 
 /* ── Header control clusters (audio + theme) ─────────────────────────────────── */
 
-/* Map view — floating cluster, top-right */
+/* Map view — control cluster on the right of the map header */
 .chrono-map-controls {
-  position:    fixed;
-  top:         14px;
-  right:       16px;
-  z-index:     130;
   display:     flex;
   align-items: center;
   gap:         8px;
+  flex-shrink: 0;
 }
 
 /* Detail view — cluster in the right of the flow header */
@@ -1063,6 +1124,28 @@ fieldset.chrono-filter-bar,
   .chrono-back-btn { min-height: 40px; }
   .audio-toggle    { width: 38px; height: 38px; }
 
-  /* Keep the map's floating search clear of the top-right control cluster. */
-  .searchbar[data-mode="map"] { top: 56px; }
+  /* Map header: brand (left) ↔ controls (right) on row 1; search full-width
+     on row 2. */
+  .chrono-map-top {
+    justify-content: space-between;
+    padding:         12px;
+  }
+  .chrono-brand          { order: 1; }
+  .chrono-map-controls   { order: 2; }
+  .chrono-map-top .searchbar,
+  .chrono-map-top .searchbar[data-mode="map"] {
+    order:      3;
+    flex-basis: 100%;
+    max-width:  none;
+    margin:     0;
+  }
+}
+
+/* Wordmark collapses gracefully so it never crowds the controls. */
+@media (max-width: 480px) {
+  .chrono-brand-label { font-size: 22px; }
+}
+
+@media (max-width: 380px) {
+  .chrono-brand-label { display: none; } /* spiral mark alone below ~380px */
 }

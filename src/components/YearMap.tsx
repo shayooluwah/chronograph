@@ -186,6 +186,8 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
 
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.3, 4])
+      // A tap that drifts < 10px still counts as a click, not a swallowed pan.
+      .clickDistance(10)
       .on('zoom', (e: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
         transformRef.current = e.transform;
         scene.attr('transform', e.transform.toString());
@@ -263,11 +265,21 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
       const enter = sel.enter().append('g')
         .attr('class',     'year-node')
         .style('cursor',   'pointer')
+        .style('touch-action', 'none')
         .attr('transform', d => { const p = yearToPosition(d); return `translate(${p.x},${p.y})`; })
         .attr('opacity',   0)
         .on('pointerenter', onPointerEnter)
         .on('pointerleave', onPointerLeave)
-        .on('click',        onNodeClick);
+        .on('pointerdown',  onNodePointerDown)
+        .on('pointerup',    onNodePointerUp);
+
+      // Transparent, finger-sized hit area (the outlined body's fill is 'none',
+      // so without this only the thin stroke would be tappable). First child so
+      // it sits beneath the visible marks but covers the whole node.
+      enter.append('circle')
+        .attr('class', 'year-hit')
+        .attr('r',     Math.max(RX, RY) + 6)
+        .attr('fill',  'transparent');
 
       // Visited marker: faint outer ring behind the filled body
       enter.filter(d => isVisited(d)).append('ellipse')
@@ -304,6 +316,7 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
       const sel = linkLayer.selectAll<SVGLineElement, number>('line').data(pairs, d => d);
       sel.exit().remove();
       sel.enter().append('line')
+        .attr('class',        'year-link')
         .attr('stroke',       LINE)
         .attr('stroke-width', 1.1)
         .merge(sel)
@@ -335,12 +348,33 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
         .attr('transform', 'scale(1)');
     }
 
-    function onNodeClick(this: SVGGElement, ev: Event, year: number) {
-      (ev as MouseEvent).stopPropagation();
+    // Selection via pointer events: a tap is a pointerdown→up that barely moves
+    // and is quick, so a real pan (which d3-zoom handles) is never mistaken for a
+    // tap and vice-versa. Works for mouse and touch alike.
+    let tapStart: { x: number; y: number; t: number; id: number } | null = null;
+
+    function onNodePointerDown(this: SVGGElement, ev: Event) {
+      const e = ev as PointerEvent;
+      tapStart = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+    }
+
+    function onNodePointerUp(this: SVGGElement, ev: Event, year: number) {
+      const e = ev as PointerEvent;
+      if (!tapStart || tapStart.id !== e.pointerId) return;
+      const moved   = Math.hypot(e.clientX - tapStart.x, e.clientY - tapStart.y);
+      const elapsed = performance.now() - tapStart.t;
+      tapStart = null;
+      if (moved < 10 && elapsed < 400) {
+        e.stopPropagation(); // a confirmed tap — don't let the zoom layer react
+        selectYear(this, year);
+      }
+    }
+
+    function selectYear(node: SVGGElement, year: number) {
       if (navigating) return;
       navigating = true;
 
-      const chosen = d3.select(this);
+      const chosen = d3.select(node);
       chosen.raise();
 
       const ZOOM_MS = 400;
@@ -440,7 +474,7 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
     <div ref={containerRef} className="year-map-container">
       <svg
         ref={svgRef}
-        style={{ display: 'block', width: '100%', height: '100%' }}
+        style={{ display: 'block', width: '100%', height: '100%', touchAction: 'none' }}
         aria-label="Infinite map of explorable years — pan or zoom to roam, select a year to view its events"
         role="img"
       />

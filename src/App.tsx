@@ -145,20 +145,27 @@ export default function App() {
           compact search panel all float over the map. */}
       {!isDetail && (
         <>
-          <div className="chrono-brand">
-            <SpiralMark variant="mini" className="chrono-brand-mark" />
-            <span className="chrono-brand-label display">Chronograph</span>
-          </div>
-          <div className="chrono-map-controls">
-            <AudioToggle enabled={audioOn} onToggle={toggleAudio} />
-            <ThemeToggle />
-          </div>
           <YearMap
             visitedYears={visitedYears}
             lastVisitedYear={lastVisitedYear}
             onYearSelect={handleSearch}
           />
-          <SearchBar mode="map" onSearch={handleSearch} />
+
+          {/* Map header — brand (left), search (centre / its own row on mobile),
+              sound + theme grouped (right). Wraps so nothing overlaps. */}
+          <header className="chrono-map-top">
+            <div className="chrono-brand">
+              <SpiralMark variant="mini" className="chrono-brand-mark" />
+              <span className="chrono-brand-label display">Chronograph</span>
+            </div>
+
+            <SearchBar mode="map" onSearch={handleSearch} />
+
+            <div className="chrono-map-controls">
+              <AudioToggle enabled={audioOn} onToggle={toggleAudio} />
+              <ThemeToggle />
+            </div>
+          </header>
         </>
       )}
 
