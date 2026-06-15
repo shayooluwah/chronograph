@@ -49,17 +49,20 @@ export interface AmbientAudio {
 export function useAmbientAudio(): AmbientAudio {
   const [enabled, setEnabled] = useState(prefEnabled);
 
-  const audioRef   = useRef<HTMLAudioElement | null>(null);
-  const queueRef   = useRef<string[]>([]);
-  const indexRef   = useRef(0);
-  const startedRef = useRef(false);   // has the first gesture happened?
-  const enabledRef = useRef(enabled); // live value for document/audio listeners
+  const audioRef    = useRef<HTMLAudioElement | null>(null);
+  const queueRef    = useRef<string[]>([]);
+  const indexRef    = useRef(0);
+  const unlockedRef = useRef(false);  // has playback successfully started once?
+  const enabledRef  = useRef(enabled); // live value for the gesture/audio listeners
 
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);
 
-  /** Wrapped so a rejected autoplay/gesture promise never throws. */
+  /** Start playback. Must be called *synchronously* inside a user gesture (iOS
+   *  ties media playback to the activating event) — never after an await. The
+   *  src is assigned up front with preload="none", so play() both downloads and
+   *  plays as part of the gesture, which mobile permits. Catch so it never throws. */
   const play = useCallback(() => {
-    audioRef.current?.play().catch(() => { /* gesture/autoplay rejection — ignore */ });
+    audioRef.current?.play().catch(() => { /* not a valid activation yet — ignore */ });
   }, []);
 
   useEffect(() => {
@@ -70,7 +73,7 @@ export function useAmbientAudio(): AmbientAudio {
 
     queueRef.current = shuffle(TRACKS);
     indexRef.current = 0;
-    audio.src = queueRef.current[0]; // select, don't fetch (preload="none")
+    audio.src = queueRef.current[0]; // selected up front, not fetched (preload="none")
 
     // Advance to the next track when one finishes, reshuffling at the end of the
     // queue and guaranteeing the new shuffle doesn't repeat the track that just
@@ -94,23 +97,43 @@ export function useAmbientAudio(): AmbientAudio {
       audio.src = queueRef.current[next]; // lazy-load the new current track
       play();                             // keep playing seamlessly
     }
+    audio.addEventListener('ended', handleEnded);
 
-    // One-time first-gesture starter (autoplay-with-sound is blocked until then).
-    function handleFirstGesture() {
-      document.removeEventListener('pointerdown', handleFirstGesture);
-      document.removeEventListener('keydown', handleFirstGesture);
-      startedRef.current = true;
-      if (enabledRef.current) play();
+    // ── First-gesture unlock ─────────────────────────────────────────────────
+    // Capture phase on window so a child handler calling stopPropagation() (e.g.
+    // a node tap) can never prevent it — a node tap is the typical first gesture
+    // on mobile. Several gesture types are tried (iOS only grants activation on
+    // touchend/click, not pointerdown), all routed to one idempotent handler that
+    // calls play() synchronously and only detaches once playback actually starts.
+    const GESTURES = ['pointerdown', 'touchend', 'click', 'keydown'] as const;
+
+    function detachUnlock() {
+      for (const type of GESTURES) window.removeEventListener(type, unlock, true);
     }
 
-    audio.addEventListener('ended', handleEnded);
-    document.addEventListener('pointerdown', handleFirstGesture);
-    document.addEventListener('keydown', handleFirstGesture);
+    function unlock() {
+      if (unlockedRef.current) { detachUnlock(); return; }
+      if (!enabledRef.current) return; // muted — the toggle will start playback
+      const el = audioRef.current;
+      if (!el) return;
+      const p = el.play();
+      if (p && typeof p.then === 'function') {
+        // Only mark unlocked / detach when the gesture genuinely started audio;
+        // a rejected attempt leaves the listeners armed for the next gesture.
+        p.then(() => { unlockedRef.current = true; detachUnlock(); }).catch(() => { /* retry next gesture */ });
+      } else {
+        unlockedRef.current = true;
+        detachUnlock();
+      }
+    }
+
+    for (const type of GESTURES) {
+      window.addEventListener(type, unlock, { capture: true, passive: true });
+    }
 
     return () => {
       audio.removeEventListener('ended', handleEnded);
-      document.removeEventListener('pointerdown', handleFirstGesture);
-      document.removeEventListener('keydown', handleFirstGesture);
+      detachUnlock();
       audio.pause();
       audio.src = '';
       audioRef.current = null;
@@ -118,17 +141,20 @@ export function useAmbientAudio(): AmbientAudio {
   }, [play]);
 
   const toggle = useCallback(() => {
-    setEnabled(prev => {
-      const next = !prev;
-      try { localStorage.setItem(STORAGE_KEY, next ? 'on' : 'off'); } catch { /* ignore */ }
+    const next = !enabledRef.current;
+    enabledRef.current = next;
+    try { localStorage.setItem(STORAGE_KEY, next ? 'on' : 'off'); } catch { /* ignore */ }
 
-      const audio = audioRef.current;
-      if (audio) {
-        if (next) { startedRef.current = true; play(); } // unmute → resume
-        else      { audio.pause(); }                     // mute → pause in place
-      }
-      return next;
-    });
+    // Tapping the toggle is itself a user gesture, so drive play()/pause()
+    // *synchronously* here (not inside the setEnabled updater, which React would
+    // defer out of the gesture and trip iOS's NotAllowedError).
+    const audio = audioRef.current;
+    if (audio) {
+      if (next) { unlockedRef.current = true; play(); } // unmute → resume
+      else      { audio.pause(); }                      // mute → pause in place
+    }
+
+    setEnabled(next);
   }, [play]);
 
   return { enabled, toggle };
