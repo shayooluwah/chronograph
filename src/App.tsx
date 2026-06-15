@@ -1,4 +1,4 @@
-import { useReducer } from 'react';
+import { useEffect, useReducer } from 'react';
 import SearchBar       from './components/SearchBar';
 import YearMap         from './components/YearMap';
 import Graph           from './components/Graph';
@@ -114,6 +114,28 @@ export default function App() {
     }
   }
 
+  /** Step chronologically by one year, skipping the non-existent year 0. */
+  function stepYear(delta: number) {
+    if (selectedYear === null || loading) return;
+    let target = selectedYear + delta;
+    if (target === 0) target += delta;
+    handleSearch(target);
+  }
+
+  // Left/right arrows step years while in the detail view (ignored while typing).
+  useEffect(() => {
+    if (!isDetail) return;
+    function onKey(e: KeyboardEvent) {
+      const el = document.activeElement;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); stepYear(-1); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); stepYear(1); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDetail, selectedYear, loading]);
+
   return (
     <>
       {/* Theme-swapped texture (stars in dark, paper grain in light), behind all */}
@@ -125,7 +147,7 @@ export default function App() {
         <>
           <div className="chrono-brand">
             <SpiralMark variant="mini" className="chrono-brand-mark" />
-            <span className="chrono-brand-label display">chronograph</span>
+            <span className="chrono-brand-label display">Chronograph</span>
           </div>
           <div className="chrono-map-controls">
             <AudioToggle enabled={audioOn} onToggle={toggleAudio} />
@@ -140,22 +162,41 @@ export default function App() {
         </>
       )}
 
-      {/* yearDetail view — a real flow header (no overlapping floats): back +
-          year on the left, search in the middle, theme toggle on the right, with
-          the category filter row stacked beneath on its own full-width line. */}
+      {/* yearDetail view — a flow column (header + filter, then the graph stage)
+          so the layout reflows cleanly as the header wraps on narrow screens. */}
       {isDetail && selectedYear !== null && (
-        <>
+        <div className="chrono-detail-view">
           <div className="chrono-top">
             <header className="chrono-detail-header">
-              <div className="chrono-detail-header-left">
+              <button
+                type="button"
+                className="chrono-back-btn"
+                onClick={() => dispatch({ type: 'SHOW_MAP' })}
+              >
+                ← Map
+              </button>
+
+              {/* Step through years (distinct from "← Map", which exits the view) */}
+              <div className="chrono-year-nav">
                 <button
                   type="button"
-                  className="chrono-back-btn"
-                  onClick={() => dispatch({ type: 'SHOW_MAP' })}
+                  className="chrono-step-btn"
+                  onClick={() => stepYear(-1)}
+                  disabled={loading}
+                  aria-label="Previous year"
                 >
-                  ← map
+                  <span aria-hidden="true">‹</span>
                 </button>
                 <span className="chrono-detail-year display">{selectedYear}</span>
+                <button
+                  type="button"
+                  className="chrono-step-btn"
+                  onClick={() => stepYear(1)}
+                  disabled={loading}
+                  aria-label="Next year"
+                >
+                  <span aria-hidden="true">›</span>
+                </button>
               </div>
 
               <SearchBar mode="graph" currentYear={selectedYear} onSearch={handleSearch} />
@@ -178,15 +219,16 @@ export default function App() {
               year={selectedYear}
               onEventSelect={event => dispatch({ type: 'SELECT_EVENT', event })}
             />
-          </div>
-        </>
-      )}
 
-      {/* Event detail panel */}
-      <EventPanel
-        event={selectedEvent}
-        onClose={() => dispatch({ type: 'SELECT_EVENT', event: null })}
-      />
+            {/* Event detail panel — overlays the graph stage (desktop drawer /
+                mobile bottom sheet), beginning beneath the header + filter rows. */}
+            <EventPanel
+              event={selectedEvent}
+              onClose={() => dispatch({ type: 'SELECT_EVENT', event: null })}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Loading screen — only for the yearMap → yearDetail transition;
           navigating around the map itself never shows it */}
@@ -197,7 +239,7 @@ export default function App() {
         >
           <Backdrop />
           <SpiralMark variant="loader" className="chrono-loading-mark" />
-          <div className="chrono-loading-name display">chronograph</div>
+          <div className="chrono-loading-name display">Chronograph</div>
           <div className="chrono-loading-sub">
             Travelling to {pendingYear ?? 'the year'}<span className="chrono-dots" aria-hidden="true" />
           </div>

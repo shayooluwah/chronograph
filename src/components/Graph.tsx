@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { categoryColor } from '../utils/colors';
 import ZoomControls from './ZoomControls';
@@ -20,19 +20,25 @@ const CY   = 305;
 const GUIDE_RINGS = [150, 210, 265]; // hairline guide rings; the middle one dashes
 const OUTER_RING  = 300;             // heavier outer ring
 const SHELLS      = [156, 196, 236]; // staggered orbits, cycled by index
-const NODE_R      = 7.5;
-const LABEL_FONT  = 11.5;
-const LINE_H      = 14;   // min vertical gap between labels (viewBox units)
-const LABEL_PAD   = NODE_R + 5.5;
-const MAX_LABEL   = 20;
 
-const truncate = (s: string) =>
-  s.length > MAX_LABEL ? s.slice(0, MAX_LABEL - 1) + '…' : s;
+const MOBILE_BP = 768;
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Graph({ events, year, onEventSelect }: GraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // Narrow viewports get shorter labels (less edge-clipping under the viewBox
+  // down-scale), a larger relative label font, and a smaller centre year so it
+  // doesn't swamp the instrument. Tracked as state so a rotate/resize re-renders.
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < MOBILE_BP,
+  );
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < MOBILE_BP);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   /** The live zoom behaviour, so the +/− buttons can drive the same transform
    *  the scroll/pinch gestures use. */
@@ -56,6 +62,18 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
+
+    // Viewport-derived sizing (viewBox units). Larger label font + bigger
+    // line-height on mobile so labels survive the down-scale; shorter truncation
+    // so they don't run past the viewBox edges.
+    const NODE_R     = isMobile ? 9    : 7.5;
+    const LABEL_FONT = isMobile ? 15   : 11.5;
+    const LINE_H     = isMobile ? 19   : 14;   // min vertical gap between labels
+    const LABEL_PAD  = NODE_R + 5.5;
+    const MAX_LABEL  = isMobile ? 12   : 20;
+    const YEAR_FONT  = isMobile ? 96   : 118;
+    const truncate = (s: string) =>
+      s.length > MAX_LABEL ? s.slice(0, MAX_LABEL - 1) + '…' : s;
 
     const svg = d3.select(svgEl);
     svg.selectAll('*').remove();
@@ -107,7 +125,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       .attr('dominant-baseline', 'middle')
       .attr('class', 'astro-year')
       .attr('fill', TEXT)
-      .attr('font-size', 118)
+      .attr('font-size', YEAR_FONT)
       .text(String(year));
 
     // ── Event nodes on staggered orbits ──────────────────────────────────────
@@ -255,7 +273,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       tooltipEl.remove();
       svg.on('.zoom', null);
     };
-  }, [events, year]); // onSelectRef is a ref — always current, no dep needed
+  }, [events, year, isMobile]); // onSelectRef is a ref — always current, no dep needed
 
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (

@@ -73,7 +73,7 @@ export default function SearchBar({ mode, currentYear, onSearch }: SearchBarProp
       {/* Hero text — collapses via grid-template-rows when in graph mode */}
       <div className="searchbar-hero-wrapper" aria-hidden={isCompact}>
         <div className="searchbar-hero">
-          <h1>ChronoGraph</h1>
+          <h1>Chronograph</h1>
           <p>Explore what was happening everywhere in history, one year at a time.</p>
         </div>
       </div>

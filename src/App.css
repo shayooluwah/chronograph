@@ -73,12 +73,21 @@
 
 /* ── yearDetail top region — header row + filter row, stacked in normal flow ──── */
 
+/* The detail view is a fixed flex column: header + filter on top (auto height),
+   the graph stage filling the rest. This reflows cleanly when the header wraps
+   on narrow screens — no magic top offsets to keep in sync. */
+.chrono-detail-view {
+  position:       fixed;
+  inset:          0;
+  z-index:        10;
+  display:        flex;
+  flex-direction: column;
+}
+
 .chrono-top {
-  position: fixed;
-  top:      0;
-  left:     0;
-  right:    0;
-  z-index:  100;
+  position:       relative;
+  z-index:        2;       /* above the graph stage for shadows/overlap */
+  flex:           0 0 auto;
   display:        flex;
   flex-direction: column;
   background:     var(--bg);
@@ -93,11 +102,12 @@
   border-bottom: 1px solid var(--line);
 }
 
-.chrono-detail-header-left {
-  display:      flex;
-  align-items:  center;
-  gap:          12px;
-  flex-shrink:  0;
+/* Year stepper — ‹ {year} › ; visually distinct from the bordered "← Map" exit */
+.chrono-year-nav {
+  display:     flex;
+  align-items: center;
+  gap:         4px;
+  flex-shrink: 0;
 }
 
 .chrono-detail-year {
@@ -108,6 +118,36 @@
   line-height:    1;
   color:          var(--text);
   font-variant-numeric: tabular-nums;
+  min-width:      4ch;
+  text-align:     center;
+}
+
+.chrono-step-btn {
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  width:           32px;
+  height:          32px;
+  background:      transparent;
+  border:          none;
+  border-radius:   2px;
+  color:           var(--text);
+  cursor:          pointer;
+  font-family:     var(--display);
+  font-weight:     800;
+  font-size:       22px;
+  line-height:     1;
+  transition:      background-color 150ms ease, color 150ms ease, opacity 150ms ease;
+}
+
+.chrono-step-btn:hover:not(:disabled) {
+  background: var(--text);
+  color:      var(--bg);
+}
+
+.chrono-step-btn:disabled {
+  opacity: 0.4;
+  cursor:  default;
 }
 
 /* The shared controls drop their fixed positioning inside the header so nothing
@@ -247,7 +287,6 @@
   font-weight:    900;
   letter-spacing: -0.045em;
   line-height:    0.85;
-  text-transform: lowercase;
   font-size:      clamp(40px, 7vw, 72px);
   color:          var(--text);
 }
@@ -439,10 +478,15 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
   margin:     0;
   max-width:  none;
   max-height: none;
-  position:   fixed;
+  /* Absolute within the graph stage, so it begins beneath the header + filter
+     rows (no overlap/merge with the filter strip) and reads as its own panel.
+     Explicit height overrides the UA dialog `height: fit-content`. */
+  position:   absolute;
   z-index:    50;
   top:        0;
   right:      0;
+  bottom:     auto;
+  left:       auto;
   height:     100%;
   width:      380px;
   display:    flex;
@@ -450,7 +494,10 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
   overflow-y: auto;
   background:  var(--surface);
   color:       var(--text);
-  border-left: 1px solid var(--line);
+  /* Raised: defined left edge against the graph + soft shadow so it lifts off
+     the background rather than blending into it. */
+  border-left: 1px solid var(--text);
+  box-shadow:  -10px 0 28px -12px rgba(0, 0, 0, 0.45);
   transform:  translateX(100%);
   visibility: hidden;
   transition:
@@ -479,16 +526,15 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
 
 @media (max-width: 767px) {
   .event-panel {
-    top:           auto;
-    bottom:        0;
-    left:          0;
-    right:         0;
+    position:      fixed;       /* bottom sheet, anchored to the viewport */
+    inset:         auto 0 0 0;  /* top auto, sides 0, bottom 0 */
     width:         100%;
-    height:        75svh;
-    max-height:    75svh;
+    height:        72svh;
+    max-height:    72svh;
     border-left:   none;
-    border-top:    1px solid var(--line);
-    border-radius: 4px 4px 0 0;
+    border-top:    1px solid var(--text);
+    border-radius: 10px 10px 0 0;
+    box-shadow:    0 -10px 28px -12px rgba(0, 0, 0, 0.45);
     transform:     translateY(100%);
   }
 
@@ -528,43 +574,52 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
 
 .event-panel-close-btn {
   background:      transparent;
-  border:         1px solid var(--line);
+  border:         1px solid var(--text);
   border-radius:  2px;
-  color:          var(--text-soft);
+  color:          var(--text);
   cursor:         pointer;
-  padding:        7px;
+  width:          40px;
+  height:         40px;
   display:        flex;
   align-items:    center;
   justify-content: center;
+  flex-shrink:    0;
   transition:     background 150ms, color 150ms, border-color 150ms;
 }
 
 .event-panel-close-btn:hover {
-  border-color: var(--text);
-  color:        var(--text);
+  background: var(--text);
+  color:      var(--bg);
 }
 
-/* Category eyebrow — mono, uppercase, in the category ink */
+/* Category eyebrow — mono, in the category ink, sentence case from the label */
 .event-panel-badge {
   display:        inline-block;
   font-family:    var(--mono);
   font-size:      11px;
   font-weight:    700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  letter-spacing: 0.08em;
   color:          var(--badge-color);
 }
 
-/* Node title — heavy lowercase grotesk */
+/* Node title — heavy grotesk, natural casing from the source */
 .event-panel-title {
   margin:         0;
   font-family:    var(--display);
   font-weight:    900;
   letter-spacing: -0.035em;
   line-height:    0.95;
-  text-transform: lowercase;
   font-size:      34px;
   color:          var(--text);
+}
+
+/* One-line Wikidata description, tucked under the title */
+.event-panel-subtitle {
+  margin:      -6px 0 0;
+  font-family: var(--mono);
+  font-size:   13px;
+  line-height: 1.5;
+  color:       var(--text-soft);
 }
 
 .event-panel-date-row {
@@ -607,6 +662,35 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
   line-height: 1.75;
   color:       var(--text);
   flex:        1;
+}
+
+/* Subtle loading skeleton for the lazily-fetched summary — holds space so the
+   card doesn't jump when the text arrives. */
+.event-panel-summary-loading {
+  display:        flex;
+  flex-direction: column;
+  gap:            10px;
+  padding-top:    3px;
+}
+
+.event-panel-summary-loading span {
+  height:        11px;
+  border-radius: 3px;
+  background:    var(--line);
+  animation:     chrono-skeleton 1.3s ease-in-out infinite;
+}
+
+.event-panel-summary-loading span:nth-child(1) { width: 100%; }
+.event-panel-summary-loading span:nth-child(2) { width: 94%;  }
+.event-panel-summary-loading span:nth-child(3) { width: 58%;  }
+
+@keyframes chrono-skeleton {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 0.7;  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .event-panel-summary-loading span { animation: none; opacity: 0.5; }
 }
 
 .event-panel-wiki-footer {
@@ -662,7 +746,6 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
   font-weight:    900;
   letter-spacing: -0.05em;
   line-height:    0.82;
-  text-transform: lowercase;
   font-size:      clamp(52px, 12vw, 150px);
   color:          var(--text);
   margin-top:     20px;
@@ -670,12 +753,10 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
 
 .chrono-loading-sub {
   font-family:    var(--mono);
-  font-size:      11px;
-  letter-spacing: 0.4em;
-  text-transform: uppercase;
+  font-size:      12px;
+  letter-spacing: 0.12em;
   color:          var(--text-soft);
   margin-top:     18px;
-  padding-left:   0.4em;
 }
 
 .chrono-dots::after {
@@ -720,12 +801,10 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
 /* ── Stage containers ────────────────────────────────────────────────────────── */
 
 .graph-container {
-  position: fixed;
-  top:      118px; /* clears the detail header (≈70px) + category filter row (≈48px) */
-  left:     0;
-  right:    0;
-  bottom:   0;
-  z-index:  10;
+  position:   relative;   /* positioning context for the EventPanel overlay */
+  flex:       1 1 auto;
+  min-height: 0;          /* allow the stage to shrink within the flex column */
+  z-index:    1;
 }
 
 .year-map-container {
@@ -885,9 +964,8 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
 
 .theme-toggle-opt {
   font-family:    var(--mono);
-  font-size:      11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size:      12px;
+  letter-spacing: 0.04em;
   color:          var(--text-soft);
   background:     transparent;
   border:         none;
@@ -946,4 +1024,45 @@ fieldset.chrono-filter-bar,
   .year-map-container svg * {
     transition: none;
   }
+}
+
+/* ── Mobile / narrow-viewport pass ───────────────────────────────────────────── */
+
+@media (max-width: 767px) {
+  /* Detail header: the two control clusters share the top row; the search drops
+     to its own full-width row beneath them. Nothing overflows horizontally. */
+  .chrono-detail-header {
+    flex-wrap:       wrap;
+    justify-content: space-between;
+    gap:             10px;
+    padding:         10px 12px;
+  }
+  /* Row 1: back (left) ↔ audio/theme (right). Row 2: year stepper, centred.
+     Row 3: search, full width. */
+  .chrono-back-btn            { order: 1; }
+  .chrono-detail-header-right { order: 2; }
+  .chrono-year-nav {
+    order:           3;
+    flex-basis:      100%;
+    justify-content: center;
+  }
+  .chrono-detail-header .searchbar,
+  .chrono-detail-header .searchbar[data-mode="graph"] {
+    order:      4;
+    flex-basis: 100%;
+    max-width:  none;
+    margin:     0;
+  }
+
+  /* Filter row a touch tighter; it already scrolls horizontally. */
+  fieldset.chrono-filter-bar { padding: 8px 12px; }
+
+  /* ≥40px touch targets on the zoom + year-step controls. */
+  .zoom-btn        { width: 40px; height: 40px; }
+  .chrono-step-btn { width: 40px; height: 40px; }
+  .chrono-back-btn { min-height: 40px; }
+  .audio-toggle    { width: 38px; height: 38px; }
+
+  /* Keep the map's floating search clear of the top-right control cluster. */
+  .searchbar[data-mode="map"] { top: 56px; }
 }

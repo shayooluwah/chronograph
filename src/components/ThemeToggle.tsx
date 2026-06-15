@@ -41,7 +41,7 @@ export default function ThemeToggle() {
           aria-pressed={theme === t}
           onClick={() => choose(t)}
         >
-          {t}
+          {t === 'dark' ? 'Dark' : 'Light'}
         </button>
       ))}
     </div>
