@@ -1,13 +1,17 @@
 import Starfield from './Starfield';
+import Meteors   from './Meteors';
 
 /**
- * The two theme-swapped texture layers, behind all content. The starfield
- * shows in dark; the paper grain shows in light (toggled by CSS on data-theme).
+ * The theme-swapped texture layers, behind all content. In dark mode, back to
+ * front: nebula → starfield → meteors. In light mode the parchment grain shows
+ * (all dark layers are hidden via CSS on data-theme).
  */
 export default function Backdrop() {
   return (
     <>
+      <div className="nebula" aria-hidden="true" />
       <Starfield />
+      <Meteors />
       <div className="grain" aria-hidden="true" />
     </>
   );

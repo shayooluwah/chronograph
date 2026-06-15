@@ -76,6 +76,30 @@ body {
   pointer-events: none;
 }
 
+/* Each star is a tiny cream dot; position, size and opacity come from inline
+   style. Twinklers carry a per-star opacity range, duration and (negative)
+   delay via custom properties, so one generic compositor-driven keyframe keeps
+   them all out of phase. */
+.star {
+  position:      absolute;
+  border-radius: 50%;
+  background:    #F2EAD0; /* soft cream — the dark theme's --text */
+}
+
+.star-twinkle {
+  opacity:   var(--tw-max);
+  animation: star-twinkle var(--tw-dur) ease-in-out var(--tw-delay) infinite alternate;
+}
+
+@keyframes star-twinkle {
+  from { opacity: var(--tw-min); }
+  to   { opacity: var(--tw-max); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .star-twinkle { animation: none; } /* rest at --tw-max, no pulse */
+}
+
 .grain {
   position:         fixed;
   inset:            0;
@@ -90,6 +114,75 @@ body {
 
 :root[data-theme="light"] .stars { display: none; }
 :root[data-theme="light"] .grain { display: block; }
+
+/* ── Nebula — backmost dark-mode atmosphere (behind stars + meteors) ──────────── */
+/* Soft, deep, desaturated radial blobs over --bg. Peak alpha is kept low so it
+   reads as atmosphere and never erodes text contrast; the centre stays dim so
+   the EventPanel and header always have a dark ground. Inset past the viewport
+   so the slow drift never exposes an edge. */
+.nebula {
+  position:       fixed;
+  inset:          -20%;
+  z-index:        0;       /* same band as .stars; DOM order puts it behind */
+  display:        none;    /* dark theme switches this on */
+  pointer-events: none;
+  background:
+    radial-gradient(38% 34% at 20% 26%, rgba(139, 110, 196, 0.30), transparent 70%), /* violet */
+    radial-gradient(36% 30% at 80% 20%, rgba(72, 150, 150, 0.22), transparent 70%),  /* teal */
+    radial-gradient(34% 32% at 70% 74%, rgba(190, 108, 132, 0.20), transparent 70%), /* rose */
+    radial-gradient(46% 42% at 28% 80%, rgba(70, 92, 182, 0.22), transparent 72%),   /* indigo-blue */
+    radial-gradient(30% 28% at 52% 52%, rgba(206, 156, 92, 0.13), transparent 70%);  /* faint amber core */
+  animation:      nebula-drift 42s ease-in-out infinite alternate;
+  will-change:    transform;
+}
+
+:root[data-theme="dark"] .nebula { display: block; }
+
+@keyframes nebula-drift {
+  from { transform: scale(1)    translate3d(0, 0, 0); }
+  to   { transform: scale(1.08) translate3d(2%, -2%, 0); }
+}
+
+/* ── Meteor shower — dark-mode only, in front of stars, behind content ────────── */
+.meteors {
+  position:       fixed;
+  inset:          0;
+  z-index:        0;       /* DOM-ordered after .stars → paints in front of them */
+  display:        none;    /* dark theme switches this on */
+  pointer-events: none;
+  overflow:       hidden;
+}
+
+:root[data-theme="dark"] .meteors { display: block; }
+
+/* A thin streak: a horizontal tail fading from transparent → cream star colour.
+   The bright leading end is at the element's right; transform-origin:left lets
+   translateX carry the head forward along the rotated travel axis. */
+.meteor {
+  position:        absolute;
+  width:           var(--len);
+  height:          2px;
+  border-radius:   2px;
+  transform-origin:left center;
+  background:      linear-gradient(to left,
+                     rgba(242, 234, 208, calc(0.9 * var(--bright))),
+                     transparent);
+  opacity:         0;
+  will-change:     transform, opacity; /* only present on live meteor elements */
+  animation:       meteor-fly var(--dur) linear forwards;
+}
+
+@keyframes meteor-fly {
+  0%   { opacity: 0;             transform: rotate(var(--ang)) translateX(0); }
+  10%  { opacity: var(--bright); }
+  90%  { opacity: var(--bright); }
+  100% { opacity: 0;             transform: rotate(var(--ang)) translateX(var(--dist)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nebula { animation: none; } /* static nebula remains */
+  .meteor { display: none; }   /* belt-and-braces; the component spawns none */
+}
 
 /* Heavy grotesk display voice — headlines, year, wordmark */
 .display {
