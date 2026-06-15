@@ -18,6 +18,9 @@ export interface HistoricalEvent {
   category: EventCategory;
   wikidataId: string;
   wikipediaUrl?: string;
+  /** enwiki sitelink title (resolved during enrichment) — used to lazily fetch
+   *  the fuller Wikipedia summary when a card opens. */
+  wikipediaTitle?: string;
 }
 
 export interface GraphNode {

@@ -206,7 +206,8 @@ export async function enrichEvents(events: HistoricalEvent[]): Promise<Historica
       ...e,
       title:       d.label?.trim()       || e.title,
       description: d.description?.trim()  || e.description,
-      ...(d.wikipediaUrl ? { wikipediaUrl: d.wikipediaUrl } : {}),
+      ...(d.wikipediaUrl   ? { wikipediaUrl:   d.wikipediaUrl }   : {}),
+      ...(d.wikipediaTitle ? { wikipediaTitle: d.wikipediaTitle } : {}),
     };
   });
 }

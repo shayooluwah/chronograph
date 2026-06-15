@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { categoryColor } from '../utils/colors';
+import { useEventSummary } from '../hooks/useEventSummary';
 import type { HistoricalEvent, EventCategory } from '../types';
 
 const CATEGORY_LABELS: Record<EventCategory, string> = {
@@ -87,8 +88,20 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [event, onClose]);
 
+  // Fuller Wikipedia summary, fetched lazily for the open card only.
+  const { summary, loading } = useEventSummary(event);
+
   const color    = event ? categoryColor(event.category) : 'var(--text-soft)';
   const catLabel = event ? CATEGORY_LABELS[event.category] : '';
+
+  // Card body hierarchy: short Wikidata description as a one-line subtitle, the
+  // fuller Wikipedia extract as the paragraph. When there's no extract, the
+  // description stands alone as the body; when there's neither, show nothing.
+  const desc = event?.description?.trim() ?? '';
+  const descIsPrefixOfSummary =
+    !!summary && !!desc && summary.toLowerCase().startsWith(desc.toLowerCase().slice(0, 30));
+  const subtitle = (loading || summary) && desc && !descIsPrefixOfSummary ? desc : '';
+  const bodyText = summary ?? (loading ? '' : desc);
 
   return (
     <dialog
@@ -125,6 +138,9 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
             {/* Title */}
             <h2 className="event-panel-title">{event.title}</h2>
 
+            {/* Subtitle — short Wikidata description, one line under the title */}
+            {subtitle && <p className="event-panel-subtitle">{subtitle}</p>}
+
             {/* Year / Date */}
             <div className="event-panel-date-row">
               <span className="event-panel-date-chip">
@@ -140,14 +156,17 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
               </div>
             )}
 
-            {/* Divider */}
-            <div className="event-panel-divider" />
+            {/* Body — fuller Wikipedia extract, fetched lazily on open. A subtle
+                skeleton holds the space while it loads (no layout jump). */}
+            {(loading || bodyText) && <div className="event-panel-divider" />}
 
-            {/* Description — resolved upstream by the enrichment service
-                (Wikidata description → Wikipedia summary fallback). */}
-            <p className="event-panel-description">
-              {event.description?.trim() || 'No description available'}
-            </p>
+            {loading ? (
+              <div className="event-panel-summary-loading" aria-hidden="true">
+                <span /><span /><span />
+              </div>
+            ) : bodyText ? (
+              <p className="event-panel-description">{bodyText}</p>
+            ) : null}
           </>
         )}
       </div>
