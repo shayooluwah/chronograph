@@ -31,7 +31,10 @@
       "PowerShell($a = Get-ChildItem \"C:\\\\Users\\\\GoDAM\\\\Documents\\\\Chronograph\\\\public\\\\audio\" -File; $a | ForEach-Object { \"{0}  {1:N1} MB\" -f $_.Name, \\($_.Length/1MB\\) }; \"TOTAL: {0:N1} MB\" -f \\(\\($a | Measure-Object Length -Sum\\).Sum/1MB\\))",
       "PowerShell(git --no-pager status --porcelain=v1 --branch)",
       "PowerShell(git --no-pager diff --stat HEAD; echo \"EXIT:$LASTEXITCODE\"; echo \"===LOG===\"; git --no-pager log --oneline -3)",
-      "PowerShell(Get-Location; \\(Get-Command git\\).Source; git rev-parse --is-inside-work-tree)"
+      "PowerShell(Get-Location; \\(Get-Command git\\).Source; git rev-parse --is-inside-work-tree)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 40; \"TSC EXIT $LASTEXITCODE\")",
+      "PowerShell(git.exe add -A)",
+      "PowerShell(git.exe commit -F tmp-commit-msg.txt)"
     ]
   }
 }

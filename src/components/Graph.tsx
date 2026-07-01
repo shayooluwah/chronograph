@@ -2,7 +2,50 @@ import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { categoryColor } from '../utils/colors';
 import ZoomControls from './ZoomControls';
-import type { GraphProps, NodeDatum } from '../types';
+import type { GraphProps, NodeDatum, HistoricalEvent, EventCategory } from '../types';
+
+// Round-robin order for spreading colours around the ring: one from each
+// category in turn, so no single colour concentrates in one arc.
+const CATEGORY_SEQUENCE: EventCategory[] = [
+  'war', 'event', 'birth', 'death', 'discovery', 'publication', 'organization', 'other',
+];
+
+/** Interleave the (per-category notability-ranked) events by round-robin across
+ *  categories. The result spreads colours evenly and front-loads the most
+ *  notable of every category, which is what the label budget then keeps. */
+function interleaveByCategory(events: HistoricalEvent[]): HistoricalEvent[] {
+  const byCat = new Map<EventCategory, HistoricalEvent[]>();
+  for (const cat of CATEGORY_SEQUENCE) byCat.set(cat, []);
+  for (const e of events) {
+    if (!byCat.has(e.category)) byCat.set(e.category, []);
+    byCat.get(e.category)!.push(e);
+  }
+  const lists = [...byCat.values()].filter(l => l.length);
+  const out: HistoricalEvent[] = [];
+  const cursors = lists.map(() => 0);
+  let remaining = events.length;
+  while (remaining > 0) {
+    for (let k = 0; k < lists.length; k++) {
+      if (cursors[k] < lists[k].length) { out.push(lists[k][cursors[k]++]); remaining--; }
+    }
+  }
+  return out;
+}
+
+function gcd(a: number, b: number): number {
+  while (b) { const t = a % b; a = b; b = t; }
+  return a;
+}
+
+/** A stride ≈ N/φ that is coprime to N, so `(i * stride) % N` is a permutation
+ *  of all slots: every node keeps an exactly-even angular slice, but consecutive
+ *  (notability-ranked) nodes land ~0.6 of the ring apart instead of adjacent. */
+function coprimeStride(n: number): number {
+  if (n < 4) return 1;
+  let s = Math.max(1, Math.round(n / 1.618033988749895));
+  while (gcd(s, n) !== 1) s++;
+  return s;
+}
 
 // Structural colours as live CSS-variable references, so the instrument
 // recolours instantly when the theme toggles (no re-render required).
@@ -19,7 +62,8 @@ const CY   = 305;
 
 const GUIDE_RINGS = [150, 210, 265]; // hairline guide rings; the middle one dashes
 const OUTER_RING  = 300;             // heavier outer ring
-const SHELLS      = [156, 196, 236]; // staggered orbits, cycled by index
+// Orbit radii are chosen per-render from the node count (see shellRadii below),
+// capped to the viewBox so the outermost never clips.
 
 const MOBILE_BP = 768;
 
@@ -70,10 +114,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
     const LABEL_FONT = isMobile ? 15   : 11.5;
     const LINE_H     = isMobile ? 19   : 14;   // min vertical gap between labels
     const LABEL_PAD  = NODE_R + 5.5;
-    const MAX_LABEL  = isMobile ? 12   : 20;
     const YEAR_FONT  = isMobile ? 96   : 118;
-    const truncate = (s: string) =>
-      s.length > MAX_LABEL ? s.slice(0, MAX_LABEL - 1) + '…' : s;
 
     const svg = d3.select(svgEl);
     svg.selectAll('*').remove();
@@ -131,15 +172,41 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       .text(String(year));
 
     // ── Event nodes on staggered orbits ──────────────────────────────────────
-    const n = events.length || 1;
+    // Interleave categories so no colour bunches into one arc, then place the
+    // notability-ordered list onto exactly-even slices via a coprime stride: the
+    // slot map is a permutation (every node still gets a 360°/N slice), but
+    // angular neighbours now differ in both category and rank — which is what
+    // stops the post-recall density from piling up in one sector (the bottom).
+    const orderedEvents = interleaveByCategory(events);
+    const n      = orderedEvents.length || 1;
+    const stride = coprimeStride(n);
+    const OFFSET = -Math.PI / 2;
 
-    const nodeData: NodeDatum[] = events.map((event, i) => {
-      const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
-      const cos   = Math.cos(angle);
-      const sin   = Math.sin(angle);
-      // Cycle through shells by index so angular neighbours sit at different
-      // radii — neighbouring labels then fall at different distances.
-      const radius = SHELLS[i % SHELLS.length];
+    // Radius/shells grow with the node count so labels keep room and the centre
+    // year isn't crowded; the outermost is capped to the viewBox (vertical is the
+    // tighter axis, half-height ≈ CY) so nodes never clip at the edge.
+    const shellRadii = n > 60
+      ? (isMobile ? [146, 184, 222, 260] : [150, 190, 230, 268])
+      : (isMobile ? [150, 196, 242]      : [156, 200, 244]);
+
+    // At high density truncate harder (full name stays in the hover title) and
+    // stop labelling past a budget — never dropping nodes, only deferring the
+    // least-notable labels to hover. The interleave front-loads notability, so
+    // the first `labelBudget` of orderedEvents are the top items across colours.
+    const dense       = n > 50;
+    const maxLabel    = isMobile ? (dense ? 9 : 12) : (dense ? 14 : 20);
+    const labelBudget = isMobile ? 26 : 60;
+    const truncate = (s: string) =>
+      s.length > maxLabel ? s.slice(0, maxLabel - 1) + '…' : s;
+
+    const nodeData: NodeDatum[] = orderedEvents.map((event, i) => {
+      const slot   = (i * stride) % n;
+      const angle  = (slot / n) * 2 * Math.PI + OFFSET;
+      const cos    = Math.cos(angle);
+      const sin    = Math.sin(angle);
+      // Shell by slot (not i) so angular neighbours sit at different radii —
+      // neighbouring labels then fall at different distances.
+      const radius = shellRadii[slot % shellRadii.length];
       const right  = cos >= -0.01;
       return {
         event,
@@ -153,12 +220,16 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
         labelX:      right ? LABEL_PAD : -LABEL_PAD,
         labelY:      0,
         nudged:      false,
+        showLabel:   i < labelBudget,
         pulsePhase:  0,
         pulsePeriod: 0,
       };
     });
 
-    // Greedy vertical de-collision per hemisphere so no two labels overlap.
+    // Greedy vertical de-collision, run across ALL shells of a hemisphere at once
+    // (sorted top→bottom) so no two labels overlap; overlaps are pushed apart by
+    // a line-height. Only labelled nodes take part; a label shoved more than a
+    // line off its own node earns a faint leader back to it.
     function deCollide(group: NodeDatum[]) {
       group.sort((a, b) => (a.finalY + a.labelY) - (b.finalY + b.labelY));
       let lastY = -Infinity;
@@ -167,13 +238,14 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
         if (worldY < lastY + LINE_H) {
           worldY   = lastY + LINE_H;
           d.labelY = worldY - d.finalY;
-          d.nudged = true;
         }
+        d.nudged = Math.abs(d.labelY) > LINE_H;
         lastY = worldY;
       }
     }
-    deCollide(nodeData.filter(d =>  d.anchorRight));
-    deCollide(nodeData.filter(d => !d.anchorRight));
+    const labelled = nodeData.filter(d => d.showLabel);
+    deCollide(labelled.filter(d =>  d.anchorRight));
+    deCollide(labelled.filter(d => !d.anchorRight));
 
     // ── Spokes (hairline, centre → node) ─────────────────────────────────────
     const linkLayer = scene.append('g').attr('class', 'links');
@@ -203,8 +275,8 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       .attr('stroke',       BG)
       .attr('stroke-width', 1.5);
 
-    // Faint leader line where de-collision nudged a label off its radius.
-    nodeGroups.filter(d => d.nudged).append('line')
+    // Faint leader line where de-collision nudged a label far off its radius.
+    nodeGroups.filter(d => d.showLabel && d.nudged).append('line')
       .attr('class', 'label-leader')
       .attr('x1', 0).attr('y1', 0)
       .attr('x2', d => d.labelX)
@@ -214,7 +286,9 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       .attr('pointer-events', 'none');
 
     // Labels: mono, ink, hemisphere-anchored outward (never the category colour).
-    const labels = nodeGroups.append('text')
+    // Only nodes within the label budget carry text; the rest show their name on
+    // hover (below), so every node stays present while dense years stay legible.
+    const labels = nodeGroups.filter(d => d.showLabel).append('text')
       .attr('class',             'astro-label')
       .attr('text-anchor',       d => d.anchorRight ? 'start' : 'end')
       .attr('x',                 d => d.labelX)

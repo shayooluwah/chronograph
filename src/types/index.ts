@@ -63,7 +63,8 @@ export interface NodeDatum {
   label:        string;   // truncated display text
   labelX:       number;   // label anchor, local x offset from the node
   labelY:       number;   // label anchor, local y offset (after de-collision)
-  nudged:       boolean;  // de-collision moved the label → draw a leader line
+  nudged:       boolean;  // de-collision moved the label far → draw a leader line
+  showLabel:    boolean;  // rendered with a text label (vs. node-only, name on hover)
   pulsePhase:   number;
   pulsePeriod:  number;
 }
