@@ -110,21 +110,24 @@ function buildBranch(branch, start, end) {
 }
 
 /**
- * Assembles a group of branches into one query: their UNION, plus a single
- * Wikipedia-article join and label/description resolution over the merged rows.
+ * Assembles a group of branches into one query: just the UNION of their ranked
+ * subqueries, carrying each row's QID, category tag and sitelink count.
+ *
+ * Deliberately lightweight: no `wikibase:label` service and no Wikipedia-article
+ * join. Those ran per-row over the whole merged set and were the main cost that
+ * forced the small per-branch caps — yet the label service returns nothing
+ * usable here anyway (its auto-label is disabled in "manual mode"), so titles
+ * came back as bare QIDs regardless. The client resolves labels, descriptions
+ * and links lazily (wbgetentities) for only the nodes it actually renders, which
+ * is what lets these branches return deep, notability-ranked pools affordably.
+ * `?sl` (sitelink count) is surfaced so the client can rank/slice per category.
  */
 function buildGroupQuery(year, branches) {
   const [start, end] = yearBounds(year);
   const union = branches.map((b) => buildBranch(b, start, end)).join('\n  UNION\n');
   return `
-SELECT DISTINCT ?item ?cat ?itemLabel ?description ?article WHERE {
+SELECT DISTINCT ?item ?cat ?sl WHERE {
 ${union}
-  OPTIONAL { ?article schema:about ?item; schema:inLanguage "en";
-             schema:isPartOf <https://en.wikipedia.org/>. }
-  SERVICE wikibase:label {
-    bd:serviceParam wikibase:language "en".
-    ?item schema:description ?description.
-  }
 }`;
 }
 
@@ -141,14 +144,20 @@ const Q_HISTSTATE = '?item wdt:P31/wdt:P279* wd:Q3024240.';     // historical co
 const Q_SPORT     = '?item wdt:P31/wdt:P279* wd:Q13406554.';    // sports competition
 const Q_ORG       = '?item wdt:P31/wdt:P279* wd:Q43229.';       // organization
 
+// Per-branch `limit` is now a safety cap against pathological payloads, NOT a
+// notability trim: each branch returns as deep a sitelink-ranked pool as its
+// time budget allows, and the client tiers what it renders. Cheap date-indexed
+// branches (births, deaths, publications, discoveries) go deep (~250); branches
+// gated by an expensive class path (states, sports, orgs) stay smaller and lean
+// on the per-group timeout to degrade gracefully rather than stall.
+const DEEP_LIMIT = 250; // cheap, date-indexed branches
 const QUERY_GROUPS = [
   // People — date-first (humans are far too numerous to enter class-first). The
-  // P569/P570 date index makes these branches cheap (~4s), so the limit is set
-  // generously: ranking still floats the headliners up, but regionally-notable
-  // figures (e.g. Uthman dan Fodio, b.1754, ~16th by sitelinks) aren't clipped.
+  // P569/P570 date index makes these branches cheap, so they return a deep pool;
+  // the client renders only a slice. Ranking still floats the headliners up.
   { branches: [
-    { category: 'birth', dateProps: ['P569'], classTriple: Q_HUMAN, limit: 30 },
-    { category: 'death', dateProps: ['P570'], classTriple: Q_HUMAN, limit: 30 },
+    { category: 'birth', dateProps: ['P569'], classTriple: Q_HUMAN, limit: DEEP_LIMIT },
+    { category: 'death', dateProps: ['P570'], classTriple: Q_HUMAN, limit: DEEP_LIMIT },
   ] },
   // Conflicts (P580 start time etc.) + country foundings & independences (P571
   // inception) — all small classes, so class-first. Inceptions are tagged as
@@ -160,29 +169,29 @@ const QUERY_GROUPS = [
   // model their independence on a transitional item rather than the modern one —
   // e.g. 1960 Nigerian independence lives on "Federation of Nigeria" (a
   // historical country), not the modern Nigeria item (whose P571 is 1963).
+  // These classes are naturally small, so the caps are generous safety limits.
   { branches: [
-    { category: 'war',   dateProps: ['P580', 'P585', 'P582'], classTriple: Q_WAR,       classFirst: true, limit: 15 },
-    { category: 'event', dateProps: ['P571'],                 classTriple: Q_STATE,     classFirst: true, limit: 25 },
-    { category: 'event', dateProps: ['P571'],                 classTriple: Q_HISTSTATE, classFirst: true, limit: 15 },
+    { category: 'war',   dateProps: ['P580', 'P585', 'P582'], classTriple: Q_WAR,       classFirst: true, limit: 80 },
+    { category: 'event', dateProps: ['P571'],                 classTriple: Q_STATE,     classFirst: true, limit: 80 },
+    { category: 'event', dateProps: ['P571'],                 classTriple: Q_HISTSTATE, classFirst: true, limit: 50 },
   ] },
   // Sporting events (World Cups, Olympics, …). Isolated, and given a tight
   // timeout: ranking by sitelinks (what surfaces the headline event over the
   // hundreds of minor ones) is a full sort whose cost swings with how busy the
   // sporting year was. On a heavy year it would blow the budget, so we let it
   // bail early and degrade to "no sports this year" rather than stall the whole
-  // response — every other category is unaffected.
+  // response — every other category is unaffected. Stays bounded for speed.
   { branches: [
-    { category: 'event', dateProps: ['P585', 'P580'], classTriple: Q_SPORT, classFirst: true, minSitelinks: 8, limit: 12 },
+    { category: 'event', dateProps: ['P585', 'P580'], classTriple: Q_SPORT, classFirst: true, minSitelinks: 8, limit: 40 },
   ], timeoutMs: 24_000 },
   // Creations: publications (P577) and discoveries/inventions (P575) need no
-  // class test to be meaningful; organizations (P571) use the nested strategy.
-  // Thresholds are lowered and limits raised so moderately-notable works pass
-  // (ranking still surfaces the headliners first). The org nested subquery widens
-  // its high-sitelink pre-cut to 120 so more candidates reach the class test.
+  // class test, so they go deep like the people branches. Organizations (P571)
+  // use the nested strategy (high-sitelink pre-cut, then the expensive org class
+  // path) so they stay bounded for speed.
   { branches: [
-    { category: 'publication',  dateProps: ['P577'], minSitelinks: 8, limit: 15 },
-    { category: 'discovery',    dateProps: ['P575'], limit: 12 },
-    { category: 'organization', dateProps: ['P571'], classTriple: Q_ORG, nested: true, minSitelinks: 12, nestedLimit: 120, limit: 12 },
+    { category: 'publication',  dateProps: ['P577'], minSitelinks: 8, limit: DEEP_LIMIT },
+    { category: 'discovery',    dateProps: ['P575'], limit: 200 },
+    { category: 'organization', dateProps: ['P571'], classTriple: Q_ORG, nested: true, minSitelinks: 12, nestedLimit: 150, limit: 60 },
   ] },
 ];
 
@@ -237,7 +246,9 @@ async function runSparqlQuery(sparql, timeoutMs = 28_000) {
 
 /**
  * Converts a raw SPARQL result binding into a HistoricalEvent object. The
- * category is read from the row's ?cat tag, set by the branch that produced it.
+ * category is read from the row's ?cat tag and the sitelink count from ?sl (the
+ * notability rank the client sorts/slices on). The title starts as the QID —
+ * the client resolves the human-readable label lazily when the node is rendered.
  *
  * @param {object} binding - One row from results.bindings
  * @param {number} year    - The requested year (integer)
@@ -249,17 +260,16 @@ function normaliseBinding(binding, year) {
   const rawCat   = binding.cat?.value ?? 'other';
   const category = VALID_CATEGORIES.has(rawCat) ? rawCat : 'other';
 
-  const articleUri = binding.article?.value ?? '';
-  const wikipediaUrl = articleUri.startsWith('https://en.wikipedia.org/') ? articleUri : undefined;
+  const sitelinks = Number(binding.sl?.value ?? 0);
 
   return {
     id: wikidataId,
-    title: binding.itemLabel?.value ?? wikidataId,
-    description: binding.description?.value ?? '',
+    title: wikidataId,   // placeholder; resolved client-side on render
+    description: '',
     year,
     category,
     wikidataId,
-    ...(wikipediaUrl && { wikipediaUrl }),
+    sitelinks,
   };
 }
 

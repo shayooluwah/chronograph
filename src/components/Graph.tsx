@@ -101,6 +101,11 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
     d3.select(svgEl).transition().duration(200).call(zoom.scaleBy, factor);
   }
 
+  /** Signature of the rendered node *set*. Lets the reveal animation fire on a
+   *  real tier change (IDs added/removed) but not when lazy enrichment merges
+   *  labels onto the same nodes — that would re-flash them for nothing. */
+  const prevSigRef = useRef<string>('');
+
   // ── D3 render ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -357,13 +362,31 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
         }
       });
 
-    // ── Gentle entry fade (respects reduced motion) ──────────────────────────
+    // ── Entry reveal: fade + scale nodes in, lightly staggered ───────────────
+    // Fires on a real tier change (the node-id set changed), so drilling in reads
+    // as "revealing more"; a label-only re-render (lazy enrichment merging in)
+    // keeps the same set and swaps text in place without re-flashing. Respects
+    // reduced motion.
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    if (!reduceMotion) {
-      [linkLayer, nodeLayer].forEach(layer => {
-        layer.attr('opacity', 0)
-          .transition().duration(600).ease(d3.easeCubicOut)
+    const sig     = nodeData.map(d => d.event.id).join(',');
+    const animate = !reduceMotion && sig !== prevSigRef.current;
+    prevSigRef.current = sig;
+    if (animate) {
+      linkLayer.attr('opacity', 0)
+        .transition().duration(500).ease(d3.easeCubicOut)
+        .attr('opacity', 1);
+
+      nodeGroups.each(function (_, i) {
+        const g = d3.select(this);
+        const delay = Math.min(i * 5, 320); // gentle cascade, capped so it stays snappy
+        g.attr('opacity', 0)
+          .transition().delay(delay).duration(420).ease(d3.easeCubicOut)
           .attr('opacity', 1);
+        // Scale just the visible dot (first <circle>); the hit area stays put.
+        g.select<SVGCircleElement>('circle')
+          .attr('transform', 'scale(0.35)')
+          .transition().delay(delay).duration(420).ease(d3.easeCubicOut)
+          .attr('transform', 'scale(1)');
       });
     }
 

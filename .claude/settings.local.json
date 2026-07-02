@@ -34,7 +34,15 @@
       "PowerShell(Get-Location; \\(Get-Command git\\).Source; git rev-parse --is-inside-work-tree)",
       "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 40; \"TSC EXIT $LASTEXITCODE\")",
       "PowerShell(git.exe add -A)",
-      "PowerShell(git.exe commit -F tmp-commit-msg.txt)"
+      "PowerShell(git.exe commit -F tmp-commit-msg.txt)",
+      "PowerShell(node tmp-pool-test.mjs 1960)",
+      "PowerShell(node tmp-pool-test.mjs 1960 1754)",
+      "PowerShell(node tmp-group-timing.mjs 1754 0)",
+      "PowerShell(node tmp-group-timing.mjs 1960 0)",
+      "PowerShell(node tmp-group-timing.mjs 1754 3)",
+      "PowerShell(node tmp-group-timing.mjs 1960 3)",
+      "PowerShell(\"--- people \\(0\\) + creations \\(3\\), sequential ---\")",
+      "PowerShell(node tmp-pool-test.mjs 1754)"
     ]
   }
 }

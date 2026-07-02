@@ -21,6 +21,9 @@ export interface HistoricalEvent {
   /** enwiki sitelink title (resolved during enrichment) — used to lazily fetch
    *  the fuller Wikipedia summary when a card opens. */
   wikipediaTitle?: string;
+  /** Wikidata sitelink count — the notability proxy the API ranks by and the
+   *  client sorts/slices on when tiering which nodes to render. */
+  sitelinks?: number;
 }
 
 export interface GraphNode {

@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from 'react';
+import { useEffect, useMemo, useReducer, useRef } from 'react';
 import SearchBar       from './components/SearchBar';
 import YearMap         from './components/YearMap';
 import Graph           from './components/Graph';
@@ -12,6 +12,7 @@ import { useAmbientAudio } from './hooks/useAmbientAudio';
 import { ALL_CATEGORIES } from './constants/categories';
 import { fetchYearEvents } from './api/yearApi';
 import { enrichEvents } from './services/wikidataEnrichment';
+import { selectRenderSlice } from './utils/tiering';
 import type { HistoricalEvent, EventCategory } from './types';
 import './App.css';
 
@@ -24,7 +25,12 @@ interface AppState {
   selectedYear:     number | null;
   pendingYear:      number | null;
   visitedYears:     Set<number>;
-  events:           HistoricalEvent[];
+  /** The full deep pool for the current year, held in memory; only a tiered
+   *  slice is rendered. Raw from the API (titles start as QIDs). */
+  pool:             HistoricalEvent[];
+  /** Per-year enrichment cache, keyed by QID — grows as tiers are revealed and
+   *  their labels/descriptions are resolved lazily. Reset on each new year. */
+  enrichedById:     Record<string, HistoricalEvent>;
   loading:          boolean;
   error:            string | null;
   selectedEvent:    HistoricalEvent | null;
@@ -33,8 +39,9 @@ interface AppState {
 
 type AppAction =
   | { type: 'SEARCH_START';   year: number }
-  | { type: 'SEARCH_SUCCESS'; year: number; events: HistoricalEvent[] }
+  | { type: 'SEARCH_SUCCESS'; year: number; pool: HistoricalEvent[]; enrichedById: Record<string, HistoricalEvent> }
   | { type: 'SEARCH_ERROR' }
+  | { type: 'MERGE_ENRICH';   items: HistoricalEvent[] }
   | { type: 'SHOW_MAP' }
   | { type: 'SELECT_EVENT';   event: HistoricalEvent | null }
   | { type: 'SET_CATEGORIES'; categories: Set<EventCategory> };
@@ -50,7 +57,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
         pendingYear:  null,
         loading:      false,
         selectedYear: action.year,
-        events:       action.events,
+        pool:         action.pool,
+        enrichedById: action.enrichedById, // fresh cache seeded with the first skim
         // The map lays years out deterministically, so opening one only needs
         // to be remembered as visited (highlighted, and flown to on return).
         visitedYears: state.visitedYears.has(action.year)
@@ -60,6 +68,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
     }
     case 'SEARCH_ERROR':
       return { ...state, pendingYear: null, loading: false, error: 'Could not load data for this year. Try another.' };
+    case 'MERGE_ENRICH': {
+      // Fold newly-resolved nodes into the per-year cache (drill-in reveal).
+      const next = { ...state.enrichedById };
+      for (const e of action.items) next[e.id] = e;
+      return { ...state, enrichedById: next };
+    }
     case 'SHOW_MAP':
       // Node expansion around the visited year happens inside YearMap itself
       // (driven by the lastVisitedYear prop), directly in the live simulation.
@@ -76,7 +90,8 @@ const initialState: AppState = {
   selectedYear:     null,
   pendingYear:      null,
   visitedYears:     new Set<number>(),
-  events:           [],
+  pool:             [],
+  enrichedById:     {},
   loading:          false,
   error:            null,
   selectedEvent:    null,
@@ -90,11 +105,26 @@ export default function App() {
   const { enabled: audioOn, toggle: toggleAudio } = useAmbientAudio();
   const {
     view, selectedYear, pendingYear, visitedYears,
-    events, loading, error, selectedEvent, activeCategories,
+    pool, enrichedById, loading, error, selectedEvent, activeCategories,
   } = state;
 
-  const isDetail       = view === 'yearDetail' && selectedYear !== null;
-  const filteredEvents = events.filter(e => activeCategories.has(e.category));
+  const isDetail = view === 'yearDetail' && selectedYear !== null;
+
+  // The tiered slice actually rendered, and that slice with its resolved labels
+  // projected on. Both memoised so unrelated re-renders don't reshuffle nodes.
+  const renderSlice = useMemo(
+    () => selectRenderSlice(pool, activeCategories),
+    [pool, activeCategories],
+  );
+  const renderedEvents = useMemo(
+    () => renderSlice.map(e => enrichedById[e.id] ?? e),
+    [renderSlice, enrichedById],
+  );
+
+  // Keep the live active-filter set in a ref so the initial-skim enrichment in
+  // handleSearch (which runs before the state settles) tiers on the current set.
+  const activeRef = useRef(activeCategories);
+  useEffect(() => { activeRef.current = activeCategories; }, [activeCategories]);
 
   // Sets iterate in insertion order, so the last entry is the most recent visit
   let lastVisitedYear: number | null = null;
@@ -104,15 +134,32 @@ export default function App() {
     if (loading) return;
     dispatch({ type: 'SEARCH_START', year });
     try {
-      const data = await fetchYearEvents(year);
-      // Resolve readable labels/descriptions/links before rendering. Enrichment
-      // never throws, but guard anyway so a bug there can't blank the year.
-      const enriched = await enrichEvents(data).catch(() => data);
-      dispatch({ type: 'SEARCH_SUCCESS', year, events: enriched });
+      const rawPool = await fetchYearEvents(year);
+      // Enrich only the first rendered slice (the ~60 skim), so first paint is
+      // fast regardless of pool depth. Enrichment never throws, but guard anyway.
+      const skim = selectRenderSlice(rawPool, activeRef.current);
+      const enrichedSkim = await enrichEvents(skim).catch(() => skim);
+      const seed: Record<string, HistoricalEvent> = {};
+      for (const e of enrichedSkim) seed[e.id] = e;
+      dispatch({ type: 'SEARCH_SUCCESS', year, pool: rawPool, enrichedById: seed });
     } catch {
       dispatch({ type: 'SEARCH_ERROR' });
     }
   }
+
+  // Lazy enrichment: whenever the rendered slice grows past what's cached (a
+  // drill-in / filter change), resolve just the newly-revealed nodes and fold
+  // them into the per-year cache. Cached QIDs are skipped, so re-toggling a
+  // category you've already opened costs no network.
+  useEffect(() => {
+    const missing = renderSlice.filter(e => !enrichedById[e.id]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    enrichEvents(missing)
+      .then(items => { if (!cancelled) dispatch({ type: 'MERGE_ENRICH', items }); })
+      .catch(() => { /* enrichment is additive; failures leave QID placeholders */ });
+    return () => { cancelled = true; };
+  }, [renderSlice, enrichedById]);
 
   /** Step chronologically by one year, skipping the non-existent year 0. */
   function stepYear(delta: number) {
@@ -222,7 +269,7 @@ export default function App() {
 
           <div className="graph-container">
             <Graph
-              events={filteredEvents}
+              events={renderedEvents}
               year={selectedYear}
               onEventSelect={event => dispatch({ type: 'SELECT_EVENT', event })}
             />
