@@ -42,7 +42,8 @@
       "PowerShell(node tmp-group-timing.mjs 1754 3)",
       "PowerShell(node tmp-group-timing.mjs 1960 3)",
       "PowerShell(\"--- people \\(0\\) + creations \\(3\\), sequential ---\")",
-      "PowerShell(node tmp-pool-test.mjs 1754)"
+      "PowerShell(node tmp-pool-test.mjs 1754)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 20; \"TSC EXIT $LASTEXITCODE\")"
     ]
   }
 }

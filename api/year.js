@@ -193,6 +193,16 @@ const QUERY_GROUPS = [
     { category: 'discovery',    dateProps: ['P575'], limit: 200 },
     { category: 'organization', dateProps: ['P571'], classTriple: Q_ORG, nested: true, minSitelinks: 12, nestedLimit: 150, limit: 60 },
   ] },
+  // Catch-all — a broad P571 (inception) scan with no class test, tagged 'other'
+  // (the lowest dedup priority). Anything a named branch also matched keeps its
+  // named sense (states → event, orgs → organization win the QID dedup), so only
+  // genuinely uncategorised inceptions remain here: buildings & structures,
+  // artworks, monuments, ships, bridges, vehicles, software, places founded,
+  // treaties, etc. Sitelink-thresholded like publications so it early-terminates,
+  // and given its own request so it doesn't stack with the org P571 scan above.
+  { branches: [
+    { category: 'other', dateProps: ['P571'], minSitelinks: 15, limit: DEEP_LIMIT },
+  ] },
 ];
 
 /** Categories a binding's ?cat may carry; anything else falls back to 'other'. */
