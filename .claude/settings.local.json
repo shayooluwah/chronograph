@@ -43,7 +43,12 @@
       "PowerShell(node tmp-group-timing.mjs 1960 3)",
       "PowerShell(\"--- people \\(0\\) + creations \\(3\\), sequential ---\")",
       "PowerShell(node tmp-pool-test.mjs 1754)",
-      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 20; \"TSC EXIT $LASTEXITCODE\")"
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 20; \"TSC EXIT $LASTEXITCODE\")",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 30; \"TSC EXIT $LASTEXITCODE\")",
+      "PowerShell(git.exe add src/App.tsx src/App.css src/components/Graph.tsx src/components/SearchBar.tsx src/components/LuckyButton.tsx .claude/settings.local.json)",
+      "PowerShell(git.exe commit -F tmp-msg.txt)",
+      "PowerShell(git.exe status --short)",
+      "PowerShell(git.exe log --oneline -1)"
     ]
   }
 }

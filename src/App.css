@@ -1008,6 +1008,33 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
   border-color: var(--text);
 }
 
+/* ── Lucky button — jump to a random year (mirrors the audio toggle) ──────────── */
+
+.lucky-btn {
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  width:           31px;
+  height:          31px;
+  background:      transparent;
+  border:          1px solid var(--line);
+  border-radius:   2px;
+  color:           var(--text-soft);
+  cursor:          pointer;
+  transition:      background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.lucky-btn:hover:not(:disabled) {
+  color:        var(--text);
+  border-color: var(--text);
+  transform:    rotate(-12deg); /* a small playful tumble */
+}
+
+.lucky-btn:disabled {
+  opacity: 0.4;
+  cursor:  default;
+}
+
 /* ── Theme toggle — segmented Dark / Light control, top-right ─────────────────── */
 
 .theme-toggle {

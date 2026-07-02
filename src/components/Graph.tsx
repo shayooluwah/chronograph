@@ -138,11 +138,14 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
     svg.call(zoomBehaviour).on('dblclick.zoom', null);
     zoomRef.current = zoomBehaviour;
 
-    // ── Instrument: rings, ticks, outer ring ─────────────────────────────────
-    const instrument = scene.append('g').attr('class', 'instrument');
+    // ── Instrument rings (breathe) ───────────────────────────────────────────
+    // The rings live in a "breathe" group that a slow sine scales in and out
+    // around the centre (the nodes/spokes share the same motion, below). The
+    // centre year is kept in its own static layer so it stays fixed and crisp.
+    const breatheBack = scene.append('g').attr('class', 'breathe');
 
     GUIDE_RINGS.forEach(r => {
-      instrument.append('circle')
+      breatheBack.append('circle')
         .attr('cx', CX).attr('cy', CY).attr('r', r)
         .attr('fill', 'none')
         .attr('stroke', LINE)
@@ -154,27 +157,28 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       const a  = (i / 72) * 2 * Math.PI;
       const r1 = 292;
       const r2 = i % 6 === 0 ? 276 : 284;
-      instrument.append('line')
+      breatheBack.append('line')
         .attr('x1', CX + r1 * Math.cos(a)).attr('y1', CY + r1 * Math.sin(a))
         .attr('x2', CX + r2 * Math.cos(a)).attr('y2', CY + r2 * Math.sin(a))
         .attr('stroke', LINE);
     }
 
-    instrument.append('circle')
+    breatheBack.append('circle')
       .attr('cx', CX).attr('cy', CY).attr('r', OUTER_RING)
       .attr('fill', 'none')
       .attr('stroke', LINE)
       .attr('stroke-width', 1.2);
 
-    // ── Centre year — set huge in the display face ───────────────────────────
-    instrument.append('text')
-      .attr('x', CX).attr('y', CY + 4)
-      .attr('text-anchor', 'middle')
-      .attr('dominant-baseline', 'middle')
-      .attr('class', 'astro-year')
-      .attr('fill', TEXT)
-      .attr('font-size', YEAR_FONT)
-      .text(String(year));
+    // ── Centre year — huge, fixed & crisp (never breathes) ───────────────────
+    scene.append('g').attr('class', 'year-face')
+      .append('text')
+        .attr('x', CX).attr('y', CY + 4)
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'middle')
+        .attr('class', 'astro-year')
+        .attr('fill', TEXT)
+        .attr('font-size', YEAR_FONT)
+        .text(String(year));
 
     // ── Event nodes on staggered orbits ──────────────────────────────────────
     // Interleave categories so no colour bunches into one arc, then place the
@@ -252,8 +256,11 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
     deCollide(labelled.filter(d =>  d.anchorRight));
     deCollide(labelled.filter(d => !d.anchorRight));
 
+    // ── Spokes + nodes (breathe together, in front of the year face) ─────────
+    const breatheFront = scene.append('g').attr('class', 'breathe');
+
     // ── Spokes (hairline, centre → node) ─────────────────────────────────────
-    const linkLayer = scene.append('g').attr('class', 'links');
+    const linkLayer = breatheFront.append('g').attr('class', 'links');
     linkLayer.selectAll<SVGLineElement, NodeDatum>('line')
       .data(nodeData)
       .join('line')
@@ -264,7 +271,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
         .attr('stroke-width', 0.6);
 
     // ── Event node groups ────────────────────────────────────────────────────
-    const nodeLayer = scene.append('g').attr('class', 'nodes');
+    const nodeLayer = breatheFront.append('g').attr('class', 'nodes');
 
     const nodeGroups = nodeLayer
       .selectAll<SVGGElement, NodeDatum>('g.node')
@@ -390,8 +397,30 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       });
     }
 
+    // ── Breathing: slow radius oscillation around the centre ─────────────────
+    // A render-time transform on the two "breathe" groups only (like the
+    // year-map drift), so the underlying angular layout and de-collision result
+    // are untouched — nodes, labels and hit areas all ride the same transform,
+    // so clicks keep landing. The centre year stays fixed. Frozen when reduced
+    // motion is preferred (the rings simply rest at their base radius).
+    let breatheRaf = 0;
+    if (!reduceMotion) {
+      const PERIOD = 8000; // ms per full expand→contract cycle
+      const AMP    = 0.05; // ±5% of radius
+      const start  = performance.now();
+      const breathe = (now: number) => {
+        const s  = 1 + AMP * Math.sin(((now - start) / PERIOD) * 2 * Math.PI);
+        const tf = `translate(${CX},${CY}) scale(${s}) translate(${-CX},${-CY})`;
+        breatheBack.attr('transform', tf);
+        breatheFront.attr('transform', tf);
+        breatheRaf = requestAnimationFrame(breathe);
+      };
+      breatheRaf = requestAnimationFrame(breathe);
+    }
+
     // ── Cleanup ──────────────────────────────────────────────────────────────
     return () => {
+      cancelAnimationFrame(breatheRaf);
       tooltipEl.remove();
       svg.on('.zoom', null);
     };

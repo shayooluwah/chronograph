@@ -3,9 +3,8 @@ import { useState, useRef } from 'react';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface SearchBarProps {
-  mode:         'landing' | 'graph' | 'map';
-  currentYear?: number;
-  onSearch:     (year: number) => void;
+  mode:     'landing' | 'graph' | 'map';
+  onSearch: (year: number) => void;
 }
 
 // ── Pure module-level helpers ─────────────────────────────────────────────────
@@ -22,14 +21,14 @@ function parseYear(value: string): number | null {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function SearchBar({ mode, currentYear, onSearch }: SearchBarProps) {
+export default function SearchBar({ mode, onSearch }: SearchBarProps) {
   /**
-   * `raw` holds what the user has typed in the input.
-   * It is initialised once from `currentYear` and thereafter lives as pure
-   * local state — no useEffect sync needed because the only source of
-   * `currentYear` changes is the SearchBar's own onSearch call.
+   * `raw` holds what the user has typed in the input. It starts empty (showing
+   * the "Enter a year" placeholder) and is cleared again after every submit —
+   * the selected year is shown in the header/centre, so the field stays ready
+   * for the next entry rather than retaining the typed value.
    */
-  const [raw,   setRaw]   = useState(currentYear !== undefined ? String(currentYear) : '');
+  const [raw,   setRaw]   = useState('');
   const [error, setError] = useState<string | null>(null);
   const inputRef  = useRef<HTMLInputElement>(null);
   const isCompact = mode !== 'landing'; // graph and map modes collapse the hero
@@ -50,6 +49,7 @@ export default function SearchBar({ mode, currentYear, onSearch }: SearchBarProp
     }
     setError(null);
     onSearch(year);
+    setRaw(''); // reset to the "Enter a year" placeholder for the next entry
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

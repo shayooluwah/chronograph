@@ -8,6 +8,7 @@ import SpiralMark      from './components/SpiralMark';
 import Backdrop        from './components/Backdrop';
 import ThemeToggle     from './components/ThemeToggle';
 import AudioToggle     from './components/AudioToggle';
+import LuckyButton     from './components/LuckyButton';
 import { useAmbientAudio } from './hooks/useAmbientAudio';
 import { ALL_CATEGORIES } from './constants/categories';
 import { fetchYearEvents } from './api/yearApi';
@@ -169,6 +170,18 @@ export default function App() {
     handleSearch(target);
   }
 
+  /** "I'm feeling lucky" — a random year in [1 CE, this year], never the current
+   *  one, loaded with the same travel transition as a normal search. */
+  function handleLucky() {
+    if (loading) return;
+    const maxYear = new Date().getFullYear();
+    let target = 1 + Math.floor(Math.random() * maxYear);
+    while (target === selectedYear) { // avoid immediately repeating the current year
+      target = 1 + Math.floor(Math.random() * maxYear);
+    }
+    handleSearch(target);
+  }
+
   // Left/right arrows step years while in the detail view (ignored while typing).
   useEffect(() => {
     if (!isDetail) return;
@@ -209,6 +222,7 @@ export default function App() {
             <SearchBar mode="map" onSearch={handleSearch} />
 
             <div className="chrono-map-controls">
+              <LuckyButton onClick={handleLucky} disabled={loading} />
               <AudioToggle enabled={audioOn} onToggle={toggleAudio} />
               <ThemeToggle />
             </div>
@@ -253,9 +267,10 @@ export default function App() {
                 </button>
               </div>
 
-              <SearchBar mode="graph" currentYear={selectedYear} onSearch={handleSearch} />
+              <SearchBar mode="graph" onSearch={handleSearch} />
 
               <div className="chrono-detail-header-right">
+                <LuckyButton onClick={handleLucky} disabled={loading} />
                 <AudioToggle enabled={audioOn} onToggle={toggleAudio} />
                 <ThemeToggle />
               </div>
