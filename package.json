@@ -11,6 +11,8 @@
     "doctor": "npx react-doctor@latest"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "axios": "^1.16.1",
     "d3": "^7.9.0",
     "react": "^19.2.6",
