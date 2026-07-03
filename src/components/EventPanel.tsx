@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { categoryColor } from '../utils/colors';
+import { formatYear } from '../utils/year';
+import { sentenceCase } from '../utils/text';
 import { useEventSummary } from '../hooks/useEventSummary';
 import type { HistoricalEvent, EventCategory } from '../types';
 
@@ -97,7 +99,10 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
   // Card body hierarchy: short Wikidata description as a one-line subtitle, the
   // fuller Wikipedia extract as the paragraph. When there's no extract, the
   // description stands alone as the body; when there's neither, show nothing.
-  const desc = event?.description?.trim() ?? '';
+  // Wikidata descriptions are lowercase-initial by convention; render them as a
+  // sentence (cap the first letter only). The Wikipedia extract below is already
+  // sentence case, so it is left untouched.
+  const desc = sentenceCase(event?.description?.trim() ?? '');
   const descIsPrefixOfSummary =
     !!summary && !!desc && summary.toLowerCase().startsWith(desc.toLowerCase().slice(0, 30));
   const subtitle = (loading || summary) && desc && !descIsPrefixOfSummary ? desc : '';
@@ -135,8 +140,8 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
               </span>
             </div>
 
-            {/* Title */}
-            <h2 className="event-panel-title">{event.title}</h2>
+            {/* Title — Wikidata label, sentence-cased (lowercase-initial by convention) */}
+            <h2 className="event-panel-title">{sentenceCase(event.title)}</h2>
 
             {/* Subtitle — short Wikidata description, one line under the title */}
             {subtitle && <p className="event-panel-subtitle">{subtitle}</p>}
@@ -144,7 +149,7 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
             {/* Year / Date */}
             <div className="event-panel-date-row">
               <span className="event-panel-date-chip">
-                {event.date ?? event.year}
+                {event.date ?? formatYear(event.year)}
               </span>
             </div>
 
@@ -171,16 +176,18 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
         )}
       </div>
 
-      {/* Wikipedia link — pinned to bottom, only when available */}
-      {event?.wikipediaUrl && (
+      {/* External link — pinned to bottom. Prefer the Wikipedia article; fall
+          back to the Wikidata entity page when there's no enwiki article; hide
+          entirely when neither exists (never render a dead link). */}
+      {event && (event.wikipediaUrl || event.wikidataUrl) && (
         <div className="event-panel-wiki-footer">
           <a
-            href={event.wikipediaUrl}
+            href={event.wikipediaUrl ?? event.wikidataUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="event-panel-wiki-link"
           >
-            Read more on Wikipedia
+            {event.wikipediaUrl ? 'Read more on Wikipedia' : 'View on Wikidata'}
             <ExternalLinkIcon />
           </a>
         </div>

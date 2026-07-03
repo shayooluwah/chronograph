@@ -18,6 +18,9 @@ export interface HistoricalEvent {
   category: EventCategory;
   wikidataId: string;
   wikipediaUrl?: string;
+  /** Fallback external link for items with no enwiki article: the Wikidata
+   *  entity page. Rendered as "View on Wikidata" only when wikipediaUrl is absent. */
+  wikidataUrl?: string;
   /** enwiki sitelink title (resolved during enrichment) — used to lazily fetch
    *  the fuller Wikipedia summary when a card opens. */
   wikipediaTitle?: string;

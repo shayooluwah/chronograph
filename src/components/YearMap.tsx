@@ -69,6 +69,25 @@ function yearDrift(year: number, t: number): { dx: number; dy: number } {
   return { dx: amp * Math.cos(t * w + phase), dy: amp * Math.sin(t * w + phase) };
 }
 
+/** Amplitude of the radial "breathing" spread, in world px — matched to the
+ *  astrolabe's per-node drift so the home map and the year view feel the same. */
+const BREATHE_AMP = 15;
+
+/**
+ * A staggered radial "breathe": each year eases outward from the spiral core and
+ * back along its own vector from centre, on a per-year phase and period derived
+ * from the year (6.2–8.8s, matching the astrolabe). Layered on top of yearDrift,
+ * this is what makes clustered years momentarily separate rather than pulse as
+ * one. Purely a render offset — the canonical yearToPosition is never touched.
+ */
+function yearBreathe(year: number, t: number, p: { x: number; y: number }): { dx: number; dy: number } {
+  const dist   = Math.hypot(p.x, p.y) || 1;             // guard the core (0,0)
+  const period = (6.2 + hashUnit(year, 4) * 2.6) * 1000;
+  const phase  = hashUnit(year, 5) * Math.PI * 2;
+  const off    = BREATHE_AMP * Math.sin(((2 * Math.PI) / period) * t + phase);
+  return { dx: (p.x / dist) * off, dy: (p.y / dist) * off };
+}
+
 // ── Bounds helpers ────────────────────────────────────────────────────────────
 
 interface Bounds { minX: number; minY: number; maxX: number; maxY: number; }
@@ -409,11 +428,18 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
       const visR = 0.5 * Math.min(b.maxX - b.minX, b.maxY - b.minY); // inside viewport
       const bufR = visR * (1 + BUFFER);                              // out in the buffer ring
 
-      // Render-time orbital drift: a gentle per-node offset layered on the fixed
-      // position so the map feels alive (floating in space). We move the actual
-      // <g> elements, so click hit-testing keeps following them. Disabled under
-      // reduced-motion. `yearToPosition` (generation/culling) is never touched.
-      const driftFor = (year: number) => (reduceMotion ? { dx: 0, dy: 0 } : yearDrift(year, elapsed));
+      // Render-time motion: a gentle orbital drift plus a staggered radial
+      // "breathe" (the same spread the astrolabe has), layered on the fixed
+      // position so the map feels alive and clustered years momentarily separate.
+      // We move the actual <g> elements, so click hit-testing keeps following
+      // them. Disabled under reduced-motion; `yearToPosition` (generation /
+      // culling) is never touched.
+      const offsetFor = (year: number, p: { x: number; y: number }) => {
+        if (reduceMotion) return { dx: 0, dy: 0 };
+        const d = yearDrift(year, elapsed);
+        const b = yearBreathe(year, elapsed, p);
+        return { dx: d.dx + b.dx, dy: d.dy + b.dy };
+      };
 
       nodeLayer.selectAll<SVGGElement, number>('g.year-node').each(function (year) {
         const p = yearToPosition(year);
@@ -423,20 +449,20 @@ export default function YearMap({ visitedYears, lastVisitedYear, onYearSelect }:
           : 1 - 0.85 * ((d - visR) / (bufR - visR));
         const next = (opacity.get(year) ?? 0) + (target - (opacity.get(year) ?? 0)) * 0.15;
         opacity.set(year, next);
-        const { dx, dy } = driftFor(year);
+        const { dx, dy } = offsetFor(year, p);
         d3.select(this)
           .attr('opacity', next)
           .attr('transform', `translate(${p.x + dx},${p.y + dy})`);
       });
 
       // Connectors fade with the dimmer of their two endpoints, and track the
-      // drifted positions of the two years they join.
+      // moving (drift + breathe) positions of the two years they join.
       linkLayer.selectAll<SVGLineElement, number>('line')
         .attr('opacity', d => Math.min(opacity.get(d) ?? 0, opacity.get(d + 1) ?? 0))
-        .attr('x1', d => { const p = yearToPosition(d);     return p.x + driftFor(d).dx; })
-        .attr('y1', d => { const p = yearToPosition(d);     return p.y + driftFor(d).dy; })
-        .attr('x2', d => { const p = yearToPosition(d + 1); return p.x + driftFor(d + 1).dx; })
-        .attr('y2', d => { const p = yearToPosition(d + 1); return p.y + driftFor(d + 1).dy; });
+        .attr('x1', d => { const p = yearToPosition(d);     return p.x + offsetFor(d,     p).dx; })
+        .attr('y1', d => { const p = yearToPosition(d);     return p.y + offsetFor(d,     p).dy; })
+        .attr('x2', d => { const p = yearToPosition(d + 1); return p.x + offsetFor(d + 1, p).dx; })
+        .attr('y2', d => { const p = yearToPosition(d + 1); return p.y + offsetFor(d + 1, p).dy; });
     });
 
     // ── Camera: restore on resize, otherwise open on the core ─────────────────

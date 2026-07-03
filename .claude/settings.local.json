@@ -48,7 +48,20 @@
       "PowerShell(git.exe add src/App.tsx src/App.css src/components/Graph.tsx src/components/SearchBar.tsx src/components/LuckyButton.tsx .claude/settings.local.json)",
       "PowerShell(git.exe commit -F tmp-msg.txt)",
       "PowerShell(git.exe status --short)",
-      "PowerShell(git.exe log --oneline -1)"
+      "PowerShell(git.exe log --oneline -1)",
+      "PowerShell(npx react-doctor@latest --score 2>$null)",
+      "PowerShell(git.exe checkout --quiet HEAD~1)",
+      "PowerShell(git.exe checkout --quiet main)",
+      "PowerShell(\"HEAD:\")",
+      "PowerShell(\"HEAD~1:\")",
+      "PowerShell(\"back on main\")",
+      "PowerShell(npx tsc -b --pretty false 2>&1)",
+      "PowerShell(npx eslint src/App.tsx src/components/Graph.tsx src/components/EventPanel.tsx src/services/wikidataEnrichment.ts src/utils/year.ts 2>&1)",
+      "PowerShell(npx eslint src/components/YearMap.tsx src/components/EventPanel.tsx src/utils/text.ts 2>&1)",
+      "PowerShell(npx eslint src/components/TourOverlay.tsx src/App.tsx 2>&1)",
+      "Bash(git status *)",
+      "PowerShell(git add -A)",
+      "PowerShell(git commit -F \"C:\\\\Users\\\\GoDAM\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-GoDAM-Documents-Chronograph\\\\de92b602-a169-484d-b623-838d897b1e05\\\\scratchpad\\\\commit-msg.txt\")"
     ]
   }
 }

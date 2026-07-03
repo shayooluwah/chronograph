@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { categoryColor } from '../utils/colors';
+import { formatYear } from '../utils/year';
 import ZoomControls from './ZoomControls';
 import type { GraphProps, NodeDatum, HistoricalEvent, EventCategory } from '../types';
 
@@ -170,6 +171,10 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       .attr('stroke-width', 1.2);
 
     // ── Centre year — huge, fixed & crisp (never breathes) ───────────────────
+    // BC years read as "44 BC"; the trailing " BC" widens the glyph run, so trim
+    // the font a little to keep it inside the rings.
+    const yearLabel = formatYear(year);
+    const yearFont  = /BC$/.test(yearLabel) ? Math.round(YEAR_FONT * 0.8) : YEAR_FONT;
     scene.append('g').attr('class', 'year-face')
       .append('text')
         .attr('x', CX).attr('y', CY + 4)
@@ -177,8 +182,8 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
         .attr('dominant-baseline', 'middle')
         .attr('class', 'astro-year')
         .attr('fill', TEXT)
-        .attr('font-size', YEAR_FONT)
-        .text(String(year));
+        .attr('font-size', yearFont)
+        .text(yearLabel);
 
     // ── Event nodes on staggered orbits ──────────────────────────────────────
     // Interleave categories so no colour bunches into one arc, then place the
@@ -230,8 +235,11 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
         labelY:      0,
         nudged:      false,
         showLabel:   i < labelBudget,
-        pulsePhase:  0,
-        pulsePeriod: 0,
+        // Staggered breathing: a golden-angle phase so spatial neighbours are
+        // never in sync, plus a gently varied period, so clustered nodes drift
+        // apart at offset moments rather than pulsing as one rigid ring.
+        pulsePhase:  (i * 2.399963229728653) % (2 * Math.PI),
+        pulsePeriod: 6200 + (i % 6) * 520, // ~6.2–8.8s
       };
     });
 
@@ -261,7 +269,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
 
     // ── Spokes (hairline, centre → node) ─────────────────────────────────────
     const linkLayer = breatheFront.append('g').attr('class', 'links');
-    linkLayer.selectAll<SVGLineElement, NodeDatum>('line')
+    const linkSel = linkLayer.selectAll<SVGLineElement, NodeDatum>('line')
       .data(nodeData)
       .join('line')
         .attr('x1', CX).attr('y1', CY)
@@ -397,22 +405,40 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
       });
     }
 
-    // ── Breathing: slow radius oscillation around the centre ─────────────────
-    // A render-time transform on the two "breathe" groups only (like the
-    // year-map drift), so the underlying angular layout and de-collision result
-    // are untouched — nodes, labels and hit areas all ride the same transform,
-    // so clicks keep landing. The centre year stays fixed. Frozen when reduced
-    // motion is preferred (the rings simply rest at their base radius).
+    // ── Breathing ─────────────────────────────────────────────────────────────
+    // Two coupled motions, both render-time only so the angular layout and the
+    // de-collision result are never disturbed (and clicks keep landing, since
+    // each node's label + hit area are children that ride with it):
+    //   • the instrument rings scale gently as one about the centre;
+    //   • each event node drifts along its OWN radius on a staggered phase, so
+    //     clustered nodes separate at offset moments and dense rings stay
+    //     readable — the angle is fixed, only the radius is offset.
+    // The centre year sits in its own static layer and never moves. All frozen
+    // under prefers-reduced-motion (nodes rest at their base radius).
     let breatheRaf = 0;
     if (!reduceMotion) {
-      const PERIOD = 8000; // ms per full expand→contract cycle
-      const AMP    = 0.05; // ±5% of radius
-      const start  = performance.now();
+      const RING_PERIOD = 8000;                 // ms — rings' slow uniform scale
+      const RING_AMP    = 0.05;                 // ±5% of radius
+      const NODE_AMP    = isMobile ? 12 : 15;   // px — per-node radial drift
+      const start       = performance.now();
+
       const breathe = (now: number) => {
-        const s  = 1 + AMP * Math.sin(((now - start) / PERIOD) * 2 * Math.PI);
-        const tf = `translate(${CX},${CY}) scale(${s}) translate(${-CX},${-CY})`;
-        breatheBack.attr('transform', tf);
-        breatheFront.attr('transform', tf);
+        const dt = now - start;
+
+        const s = 1 + RING_AMP * Math.sin((dt / RING_PERIOD) * 2 * Math.PI);
+        breatheBack.attr('transform',
+          `translate(${CX},${CY}) scale(${s}) translate(${-CX},${-CY})`);
+
+        nodeGroups.attr('transform', d => {
+          const r = d.radius + NODE_AMP * Math.sin((dt / d.pulsePeriod) * 2 * Math.PI + d.pulsePhase);
+          d.finalX = CX + r * Math.cos(d.angle);
+          d.finalY = CY + r * Math.sin(d.angle);
+          return `translate(${d.finalX},${d.finalY})`;
+        });
+
+        // Spokes follow each node's moving outer end (centre end stays fixed).
+        linkSel.attr('x2', d => d.finalX).attr('y2', d => d.finalY);
+
         breatheRaf = requestAnimationFrame(breathe);
       };
       breatheRaf = requestAnimationFrame(breathe);
@@ -434,7 +460,7 @@ export default function Graph({ events, year, onEventSelect }: GraphProps) {
         viewBox={`0 0 ${VB_W} ${VB_H}`}
         preserveAspectRatio="xMidYMid meet"
         style={{ display: 'block', width: '100%', height: '100%', touchAction: 'none' }}
-        aria-label={`Astrolabe of historical events for ${year}`}
+        aria-label={`Astrolabe of historical events for ${formatYear(year)}`}
         role="img"
       />
       <ZoomControls onZoomIn={() => handleZoom(1.3)} onZoomOut={() => handleZoom(0.77)} />

@@ -37,6 +37,8 @@ interface EnrichedEntity {
   description?:    string;
   wikipediaTitle?: string;
   wikipediaUrl?:   string;
+  /** Fallback link (Wikidata entity page) when there's no enwiki article. */
+  wikidataUrl?:    string;
 }
 
 interface CacheEntry extends EnrichedEntity {
@@ -86,26 +88,58 @@ function wikipediaUrlFromTitle(title: string): string {
   return `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`;
 }
 
+/** The Wikidata entity page — always exists for a valid QID, so it's a safe
+ *  fallback target when an item has no Wikipedia article. */
+function wikidataUrlFromQid(qid: string): string {
+  return `https://www.wikidata.org/wiki/${qid}`;
+}
+
+/** First value from a wbgetentities labels/descriptions map, in the order the
+ *  API returned the requested languages — used as the "any language" fallback
+ *  once en and mul have both missed. */
+function firstTermValue(
+  terms: Record<string, { value?: string }> | undefined,
+): string | undefined {
+  if (!terms) return undefined;
+  for (const t of Object.values(terms)) {
+    const v = t?.value?.trim();
+    if (v) return v;
+  }
+  return undefined;
+}
+
 // ── Wikidata Action API ───────────────────────────────────────────────────────
 
 /** Minimal shape of the wbgetentities response fields we read. */
 interface WbEntity {
-  missing?:   string;
-  labels?:       { en?: { value?: string } };
-  descriptions?: { en?: { value?: string } };
+  missing?:      string;
+  labels?:       Record<string, { value?: string }>;
+  descriptions?: Record<string, { value?: string }>;
   sitelinks?:    { enwiki?: { title?: string } };
 }
 
 /**
+ * Languages requested for labels/descriptions. `en` first, then `mul` (Wikidata's
+ * language-agnostic label, which many obscure entities carry when they have no
+ * `en` label), then a few major languages so the "any available language"
+ * fallback has something to land on before we resort to the bare QID.
+ */
+const ENRICH_LANGUAGES = 'en|mul|la|fr|de|es|it';
+
+/**
  * Resolves one batch of QIDs (≤ 50) via wbgetentities. `origin=*` enables an
  * anonymous CORS request straight from the browser.
+ *
+ * Labels/descriptions fall through en → mul → any returned language; the link
+ * falls through the enwiki article → the Wikidata entity page. The bare QID is
+ * only ever a last resort (and callers treat a QID-only result as unresolved).
  */
 async function fetchEntitiesBatch(qids: string[]): Promise<Record<string, EnrichedEntity>> {
   const url = new URL(WBGETENTITIES_ENDPOINT);
   url.searchParams.set('action',     'wbgetentities');
   url.searchParams.set('ids',        qids.join('|'));
   url.searchParams.set('props',      'labels|descriptions|sitelinks');
-  url.searchParams.set('languages',  'en');
+  url.searchParams.set('languages',  ENRICH_LANGUAGES);
   url.searchParams.set('sitefilter', 'enwiki');
   url.searchParams.set('format',     'json');
   url.searchParams.set('origin',     '*');
@@ -119,12 +153,31 @@ async function fetchEntitiesBatch(qids: string[]): Promise<Record<string, Enrich
 
   for (const [qid, ent] of Object.entries(entities)) {
     if (ent?.missing !== undefined) continue;
+
     const wikipediaTitle = ent?.sitelinks?.enwiki?.title;
+
+    // Label fallback chain: en → mul → any language → the enwiki title. If none
+    // of those exist the label stays undefined, and the caller renders (or drops)
+    // the item as unresolved rather than showing a raw QID as a clickable event.
+    const label =
+      ent?.labels?.en?.value?.trim()  ||
+      ent?.labels?.mul?.value?.trim() ||
+      firstTermValue(ent?.labels)     ||
+      wikipediaTitle;
+
+    const description =
+      ent?.descriptions?.en?.value?.trim()  ||
+      ent?.descriptions?.mul?.value?.trim() ||
+      firstTermValue(ent?.descriptions);
+
     out[qid] = {
-      label:          ent?.labels?.en?.value,
-      description:    ent?.descriptions?.en?.value,
+      label,
+      description,
       wikipediaTitle,
-      wikipediaUrl:   wikipediaTitle ? wikipediaUrlFromTitle(wikipediaTitle) : undefined,
+      wikipediaUrl: wikipediaTitle ? wikipediaUrlFromTitle(wikipediaTitle) : undefined,
+      // Only offer the Wikidata page as a fallback when the item resolved to a
+      // real label — a QID-only item gets no link (the button hides instead).
+      wikidataUrl:  !wikipediaTitle && label ? wikidataUrlFromQid(qid) : undefined,
     };
   }
   return out;
@@ -207,6 +260,7 @@ export async function enrichEvents(events: HistoricalEvent[]): Promise<Historica
       title:       d.label?.trim()       || e.title,
       description: d.description?.trim()  || e.description,
       ...(d.wikipediaUrl   ? { wikipediaUrl:   d.wikipediaUrl }   : {}),
+      ...(d.wikidataUrl    ? { wikidataUrl:    d.wikidataUrl }    : {}),
       ...(d.wikipediaTitle ? { wikipediaTitle: d.wikipediaTitle } : {}),
     };
   });

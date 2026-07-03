@@ -35,16 +35,30 @@ const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
 //   they cut the candidate set by a sitelink threshold first; organizations then
 //   apply the expensive instance-of/subclass-of path to only that small set.
 
-/** ISO dateTime for Jan 1 of a (possibly negative / BCE) year. */
-function isoYearStart(year) {
-  const abs = String(Math.abs(year)).padStart(4, '0');
-  return `${year < 0 ? '-' : ''}${abs}-01-01T00:00:00Z`;
+/**
+ * Convert the app's *historical* year (no year 0; −1 = 1 BCE, −44 = 44 BCE) to
+ * the *astronomical* numbering Wikidata/XSD store dates in (1 BCE = year 0, so
+ * 44 BCE = −43). Positive years are unchanged; every BCE year shifts up by one.
+ *
+ * Without this, a query for "44 BC" (historical −44) would build the ISO year
+ * −0044 and actually match 45 BCE, silently returning the wrong year's events.
+ */
+function toAstronomicalYear(historicalYear) {
+  return historicalYear < 0 ? historicalYear + 1 : historicalYear;
 }
 
-/** [start, end) xsd:dateTime bounds covering exactly one year. */
-function yearBounds(year) {
-  // The proleptic Gregorian year after -1 (1 BCE) is 0 in XSD 1.1
-  return [isoYearStart(year), isoYearStart(year + 1)];
+/** ISO dateTime for Jan 1 of an astronomical year (may be 0 or negative). */
+function isoYearStart(astroYear) {
+  const abs = String(Math.abs(astroYear)).padStart(4, '0');
+  return `${astroYear < 0 ? '-' : ''}${abs}-01-01T00:00:00Z`;
+}
+
+/** [start, end) xsd:dateTime bounds covering exactly one historical year. */
+function yearBounds(historicalYear) {
+  // Map to astronomical numbering first; the year after −1 (1 BCE) is 0, and
+  // the year after historical −1 is historical +1 (1 CE) — both contiguous here.
+  const astro = toAstronomicalYear(historicalYear);
+  return [isoYearStart(astro), isoYearStart(astro + 1)];
 }
 
 /**

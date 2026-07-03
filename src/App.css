@@ -989,8 +989,8 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
   display:         flex;
   align-items:     center;
   justify-content: center;
-  width:           31px;
-  height:          31px;
+  width:           32px;
+  height:          32px;
   background:      transparent;
   border:          1px solid var(--line);
   border-radius:   2px;
@@ -1014,8 +1014,8 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
   display:         flex;
   align-items:     center;
   justify-content: center;
-  width:           31px;
-  height:          31px;
+  width:           32px;
+  height:          32px;
   background:      transparent;
   border:          1px solid var(--line);
   border-radius:   2px;
@@ -1043,6 +1043,8 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
   right:         16px;
   z-index:       130;
   display:       flex;
+  align-items:   center;
+  height:        32px;         /* match the square controls so the row is one height */
   gap:           2px;
   padding:       2px;
   border:        1px solid var(--line);
@@ -1051,14 +1053,18 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
 }
 
 .theme-toggle-opt {
+  display:        flex;
+  align-items:    center;
+  height:         100%;         /* fill the toggle height so both options align */
   font-family:    var(--mono);
   font-size:      12px;
+  line-height:    1;
   letter-spacing: 0.04em;
   color:          var(--text-soft);
   background:     transparent;
   border:         none;
   border-radius:  1px;
-  padding:        5px 11px;
+  padding:        0 11px;
   cursor:         pointer;
   transition:     background-color 0.2s ease, color 0.2s ease;
 }
@@ -1149,7 +1155,12 @@ fieldset.chrono-filter-bar,
   .zoom-btn        { width: 40px; height: 40px; }
   .chrono-step-btn { width: 40px; height: 40px; }
   .chrono-back-btn { min-height: 40px; }
-  .audio-toggle    { width: 38px; height: 38px; }
+
+  /* Header control cluster — one consistent height so the dice, mute and theme
+     toggle line up as a single equal-height row (they differed on mobile). */
+  .lucky-btn,
+  .audio-toggle    { width: 40px; height: 40px; }
+  .theme-toggle    { height: 40px; }
 
   /* Map header: brand (left) ↔ controls (right) on row 1; search full-width
      on row 2. */
@@ -1175,4 +1186,255 @@ fieldset.chrono-filter-bar,
 
 @media (max-width: 380px) {
   .chrono-brand-label { display: none; } /* spiral mark alone below ~380px */
+}
+
+/* ── First-run onboarding tour ───────────────────────────────────────────────── */
+
+/* Root: fixed, modal, centres the card. On the welcome / done screens it carries
+   the dimming itself; on a step the ring's box-shadow does the dimming instead,
+   so the root goes transparent to leave the highlighted control bright. It still
+   captures pointer events at all times, so the app behind stays inert. */
+.chrono-tour {
+  position:        fixed;
+  inset:           0;
+  z-index:         1000;   /* above every app control (theme toggle is 130) */
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  padding:         20px;
+  background:      rgba(0, 0, 0, 0.55);
+  animation:       chrono-tour-fade 200ms ease;
+}
+
+.chrono-tour[data-mode="step"] {
+  background: transparent;
+}
+
+@keyframes chrono-tour-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Highlight ring — the 9999px box-shadow dims everything outside the cut-out. */
+.chrono-tour-ring {
+  position:      fixed;
+  border:        2px solid var(--accent);
+  border-radius: 8px;
+  box-shadow:    0 0 0 9999px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  transition:
+    top    0.35s ease,
+    left   0.35s ease,
+    width  0.35s ease,
+    height 0.35s ease;
+}
+
+/* Card — respects the theme (dark surface in dark mode). */
+.chrono-tour-card {
+  position:       relative;   /* paints above the ring's shadow (later in DOM) */
+  width:          100%;
+  max-width:      360px;
+  display:        flex;
+  flex-direction: column;
+  gap:            14px;
+  background:     var(--surface);
+  color:          var(--text);
+  border:         0.5px solid var(--line);
+  border-radius:  12px;
+  padding:        1.5rem;
+  box-shadow:     0 18px 50px -12px rgba(0, 0, 0, 0.5);
+  animation:      chrono-tour-pop 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes chrono-tour-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+.chrono-tour-icon {
+  align-self: flex-start;
+  color:      var(--text);
+}
+
+.chrono-tour-icon[data-accent="true"] {
+  color: var(--accent);
+}
+
+.chrono-tour-heading {
+  margin:         0;
+  font-family:    var(--display);
+  font-weight:    900;
+  letter-spacing: -0.03em;
+  line-height:    1;
+  font-size:      24px;
+  color:          var(--text);
+}
+
+.chrono-tour-body {
+  margin:      0;
+  font-family: var(--mono);
+  font-size:   13px;
+  line-height: 1.6;
+  color:       var(--text-soft);
+}
+
+/* Step badge — "N of 6" pill in the accent colour */
+.chrono-tour-badge {
+  align-self:     flex-start;
+  font-family:    var(--mono);
+  font-size:      11px;
+  font-weight:    700;
+  letter-spacing: 0.06em;
+  color:          var(--accent);
+  background:     color-mix(in srgb, var(--accent) 16%, transparent);
+  border-radius:  999px;
+  padding:        3px 10px;
+}
+
+/* Icon row — muted pill with an icon + a short label */
+.chrono-tour-iconrow {
+  display:       flex;
+  align-items:   center;
+  gap:           9px;
+  background:    color-mix(in srgb, var(--text) 7%, transparent);
+  border-radius: 8px;
+  padding:       9px 12px;
+  font-family:   var(--mono);
+  font-size:     12px;
+  color:         var(--text-soft);
+}
+
+.chrono-tour-iconrow-icon {
+  display:     flex;
+  flex-shrink: 0;
+  color:       var(--text);
+}
+
+/* Example year chips */
+.chrono-tour-chips {
+  display:   flex;
+  flex-wrap: wrap;
+  gap:       6px;
+}
+
+.chrono-tour-chip {
+  font-family:   var(--mono);
+  font-size:     12px;
+  font-weight:   700;
+  border-radius: 999px;
+  padding:       4px 11px;
+}
+
+.chrono-tour-chip[data-variant="accent"] {
+  color:      var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.chrono-tour-chip[data-variant="violet"] {
+  color:      var(--c-pub);
+  background: color-mix(in srgb, var(--c-pub) 18%, transparent);
+}
+
+.chrono-tour-footnote {
+  margin:      0;
+  font-family: var(--mono);
+  font-size:   11px;
+  line-height: 1.5;
+  color:       var(--text-soft);
+  opacity:     0.85;
+}
+
+/* Footer — dots on the left, Back / Next on the right */
+.chrono-tour-footer {
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  gap:             12px;
+  margin-top:      2px;
+}
+
+.chrono-tour-dots {
+  display:     flex;
+  align-items: center;
+  gap:         6px;
+}
+
+.chrono-tour-dot {
+  width:         6px;
+  height:        6px;
+  border-radius: 999px;
+  background:    var(--line);
+  transition:    width 0.3s ease, background-color 0.3s ease;
+}
+
+.chrono-tour-dot[data-active="true"] {
+  width:      18px;
+  background: var(--accent);
+}
+
+.chrono-tour-nav {
+  display: flex;
+  gap:     8px;
+}
+
+/* Welcome / done action row — text/secondary left, primary right */
+.chrono-tour-actions {
+  display:         flex;
+  align-items:     center;
+  justify-content: space-between;
+  gap:             12px;
+  margin-top:      2px;
+}
+
+/* Buttons */
+.chrono-tour-btn-primary,
+.chrono-tour-btn-secondary,
+.chrono-tour-btn-text {
+  font-family: var(--mono);
+  font-size:   13px;
+  cursor:      pointer;
+  transition:  background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.chrono-tour-btn-primary {
+  padding:       9px 16px;
+  border:        none;
+  border-radius: 6px;
+  background:    var(--accent);
+  color:         #fff;
+}
+
+.chrono-tour-btn-primary:hover {
+  opacity: 0.88;
+}
+
+.chrono-tour-btn-secondary {
+  padding:       9px 16px;
+  border:        0.5px solid var(--text);
+  border-radius: 6px;
+  background:    transparent;
+  color:         var(--text);
+}
+
+.chrono-tour-btn-secondary:hover {
+  background: var(--text);
+  color:      var(--bg);
+}
+
+.chrono-tour-btn-text {
+  padding:    9px 6px;
+  border:     none;
+  background: transparent;
+  color:      var(--text-soft);
+}
+
+.chrono-tour-btn-text:hover {
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chrono-tour,
+  .chrono-tour-card { animation: none; }
+  .chrono-tour-ring,
+  .chrono-tour-dot  { transition: none; }
 }

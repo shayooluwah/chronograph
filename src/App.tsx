@@ -9,11 +9,13 @@ import Backdrop        from './components/Backdrop';
 import ThemeToggle     from './components/ThemeToggle';
 import AudioToggle     from './components/AudioToggle';
 import LuckyButton     from './components/LuckyButton';
+import TourOverlay     from './components/TourOverlay';
 import { useAmbientAudio } from './hooks/useAmbientAudio';
 import { ALL_CATEGORIES } from './constants/categories';
 import { fetchYearEvents } from './api/yearApi';
 import { enrichEvents } from './services/wikidataEnrichment';
 import { selectRenderSlice } from './utils/tiering';
+import { formatYear } from './utils/year';
 import type { HistoricalEvent, EventCategory } from './types';
 import './App.css';
 
@@ -117,8 +119,14 @@ export default function App() {
     () => selectRenderSlice(pool, activeCategories),
     [pool, activeCategories],
   );
+  // Project resolved labels onto the slice, then drop any item that enrichment
+  // has already tried and left with nothing but its QID — so a bare "Q12345"
+  // never renders as a clickable node that opens an empty card. Items not yet
+  // enriched (title still a QID placeholder) are kept; they resolve shortly.
   const renderedEvents = useMemo(
-    () => renderSlice.map(e => enrichedById[e.id] ?? e),
+    () => renderSlice
+      .map(e => enrichedById[e.id] ?? e)
+      .filter(e => !(enrichedById[e.id] && /^Q\d+$/.test(e.title))),
     [renderSlice, enrichedById],
   );
 
@@ -255,7 +263,7 @@ export default function App() {
                 >
                   <span aria-hidden="true">‹</span>
                 </button>
-                <span className="chrono-detail-year display">{selectedYear}</span>
+                <span className="chrono-detail-year display">{formatYear(selectedYear)}</span>
                 <button
                   type="button"
                   className="chrono-step-btn"
@@ -304,13 +312,13 @@ export default function App() {
       {loading && pendingYear !== null && (
         <output
           className="chrono-loading"
-          aria-label={`Loading data for ${pendingYear ?? 'that year'}`}
+          aria-label={`Loading data for ${pendingYear !== null ? formatYear(pendingYear) : 'that year'}`}
         >
           <Backdrop />
           <SpiralMark variant="loader" className="chrono-loading-mark" />
           <div className="chrono-loading-name display">Chronograph</div>
           <div className="chrono-loading-sub">
-            Travelling to {pendingYear ?? 'the year'}<span className="chrono-dots" aria-hidden="true" />
+            Travelling to {pendingYear !== null ? formatYear(pendingYear) : 'the year'}<span className="chrono-dots" aria-hidden="true" />
           </div>
         </output>
       )}
@@ -325,6 +333,9 @@ export default function App() {
           {error}
         </div>
       )}
+
+      {/* First-run onboarding walkthrough — self-contained; shows once per user */}
+      <TourOverlay />
     </>
   );
 }
