@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef } from 'react';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import SearchBar       from './components/SearchBar';
 import YearMap         from './components/YearMap';
 import Graph           from './components/Graph';
@@ -11,55 +12,62 @@ import AudioToggle     from './components/AudioToggle';
 import LuckyButton     from './components/LuckyButton';
 import TourOverlay     from './components/TourOverlay';
 import { useAmbientAudio } from './hooks/useAmbientAudio';
-import { ALL_CATEGORIES } from './constants/categories';
+import { categorySlugsSegment, parseCategorySlugs } from './constants/categories';
 import { fetchYearEvents } from './api/yearApi';
 import { enrichEvents } from './services/wikidataEnrichment';
 import { selectRenderSlice } from './utils/tiering';
-import { formatYear } from './utils/year';
+import { formatYear, parseYearSlug } from './utils/year';
 import type { HistoricalEvent, EventCategory } from './types';
 import './App.css';
 
-// ── State / reducer ───────────────────────────────────────────────────────────
+// ── URL helpers ─────────────────────────────────────────────────────────────
+//
+// The URL is the source of truth for (year, active filters). `yearPath` builds
+// the canonical link for a year + filter set: a bare `/:year` when all
+// categories are active, otherwise `/:year/:slugs` with alphabetically-sorted
+// slugs (see categorySlugsSegment), so the same filter set always shares alike.
+function yearPath(year: number, active: Set<EventCategory>): string {
+  const seg = categorySlugsSegment(active);
+  return seg ? `/${year}/${seg}` : `/${year}`;
+}
 
-type AppView = 'yearMap' | 'yearDetail';
+// ── State / reducer ───────────────────────────────────────────────────────────
+//
+// The reducer now owns only the *data* for the current year (the fetched pool,
+// lazy-enrichment cache, load/error status, the open event). The current year
+// and active filters live in the URL, read via useParams below — not here.
 
 interface AppState {
-  view:             AppView;
-  selectedYear:     number | null;
-  pendingYear:      number | null;
-  visitedYears:     Set<number>;
+  pendingYear:   number | null;
+  visitedYears:  Set<number>;
   /** The full deep pool for the current year, held in memory; only a tiered
    *  slice is rendered. Raw from the API (titles start as QIDs). */
-  pool:             HistoricalEvent[];
+  pool:          HistoricalEvent[];
   /** Per-year enrichment cache, keyed by QID — grows as tiers are revealed and
    *  their labels/descriptions are resolved lazily. Reset on each new year. */
-  enrichedById:     Record<string, HistoricalEvent>;
-  loading:          boolean;
-  error:            string | null;
-  selectedEvent:    HistoricalEvent | null;
-  activeCategories: Set<EventCategory>;
+  enrichedById:  Record<string, HistoricalEvent>;
+  loading:       boolean;
+  error:         string | null;
+  selectedEvent: HistoricalEvent | null;
 }
 
 type AppAction =
-  | { type: 'SEARCH_START';   year: number }
-  | { type: 'SEARCH_SUCCESS'; year: number; pool: HistoricalEvent[]; enrichedById: Record<string, HistoricalEvent> }
-  | { type: 'SEARCH_ERROR' }
-  | { type: 'MERGE_ENRICH';   items: HistoricalEvent[] }
-  | { type: 'SHOW_MAP' }
-  | { type: 'SELECT_EVENT';   event: HistoricalEvent | null }
-  | { type: 'SET_CATEGORIES'; categories: Set<EventCategory> };
+  | { type: 'FETCH_START';   year: number }
+  | { type: 'FETCH_SUCCESS'; year: number; pool: HistoricalEvent[]; enrichedById: Record<string, HistoricalEvent> }
+  | { type: 'FETCH_ERROR' }
+  | { type: 'MERGE_ENRICH';  items: HistoricalEvent[] }
+  | { type: 'SELECT_EVENT';  event: HistoricalEvent | null }
+  | { type: 'CLOSE_DETAIL' };
 
 function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
-    case 'SEARCH_START':
+    case 'FETCH_START':
       return { ...state, pendingYear: action.year, loading: true, error: null, selectedEvent: null };
-    case 'SEARCH_SUCCESS': {
+    case 'FETCH_SUCCESS':
       return {
         ...state,
-        view:         'yearDetail',
         pendingYear:  null,
         loading:      false,
-        selectedYear: action.year,
         pool:         action.pool,
         enrichedById: action.enrichedById, // fresh cache seeded with the first skim
         // The map lays years out deterministically, so opening one only needs
@@ -68,8 +76,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
           ? state.visitedYears
           : new Set(state.visitedYears).add(action.year),
       };
-    }
-    case 'SEARCH_ERROR':
+    case 'FETCH_ERROR':
       return { ...state, pendingYear: null, loading: false, error: 'Could not load data for this year. Try another.' };
     case 'MERGE_ENRICH': {
       // Fold newly-resolved nodes into the per-year cache (drill-in reveal).
@@ -77,41 +84,43 @@ function appReducer(state: AppState, action: AppAction): AppState {
       for (const e of action.items) next[e.id] = e;
       return { ...state, enrichedById: next };
     }
-    case 'SHOW_MAP':
-      // Node expansion around the visited year happens inside YearMap itself
-      // (driven by the lastVisitedYear prop), directly in the live simulation.
-      return { ...state, view: 'yearMap', selectedYear: null, selectedEvent: null, error: null };
     case 'SELECT_EVENT':
       return { ...state, selectedEvent: action.event };
-    case 'SET_CATEGORIES':
-      return { ...state, activeCategories: action.categories };
+    case 'CLOSE_DETAIL':
+      return { ...state, selectedEvent: null, error: null };
   }
 }
 
 const initialState: AppState = {
-  view:             'yearMap',
-  selectedYear:     null,
-  pendingYear:      null,
-  visitedYears:     new Set<number>(),
-  pool:             [],
-  enrichedById:     {},
-  loading:          false,
-  error:            null,
-  selectedEvent:    null,
-  activeCategories: new Set(ALL_CATEGORIES),
+  pendingYear:   null,
+  visitedYears:  new Set<number>(),
+  pool:          [],
+  enrichedById:  {},
+  loading:       false,
+  error:         null,
+  selectedEvent: null,
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function App() {
+  const params   = useParams();
+  const navigate = useNavigate();
   const [state, dispatch] = useReducer(appReducer, initialState);
   const { enabled: audioOn, toggle: toggleAudio } = useAmbientAudio();
-  const {
-    view, selectedYear, pendingYear, visitedYears,
-    pool, enrichedById, loading, error, selectedEvent, activeCategories,
-  } = state;
+  const { pendingYear, visitedYears, pool, enrichedById, loading, error, selectedEvent } = state;
 
-  const isDetail = view === 'yearDetail' && selectedYear !== null;
+  // ── Year + filters, read straight from the URL ────────────────────────────
+  const rawYear      = params.year;
+  const selectedYear = rawYear != null ? parseYearSlug(rawYear) : null;
+  const invalidYear  = rawYear != null && selectedYear === null;
+  const isDetail     = selectedYear !== null;
+
+  // Active filters derive from the URL segment; unknown slugs fall back to all.
+  const activeCategories = useMemo(
+    () => parseCategorySlugs(params.categories),
+    [params.categories],
+  );
 
   // The tiered slice actually rendered, and that slice with its resolved labels
   // projected on. Both memoised so unrelated re-renders don't reshuffle nodes.
@@ -119,10 +128,8 @@ export default function App() {
     () => selectRenderSlice(pool, activeCategories),
     [pool, activeCategories],
   );
-  // Project resolved labels onto the slice, then drop any item that enrichment
-  // has already tried and left with nothing but its QID — so a bare "Q12345"
-  // never renders as a clickable node that opens an empty card. Items not yet
-  // enriched (title still a QID placeholder) are kept; they resolve shortly.
+  // Drop items enrichment has tried and left as a bare QID so they never render
+  // as clickable nodes that open an empty card; keep not-yet-enriched placeholders.
   const renderedEvents = useMemo(
     () => renderSlice
       .map(e => enrichedById[e.id] ?? e)
@@ -131,7 +138,8 @@ export default function App() {
   );
 
   // Keep the live active-filter set in a ref so the initial-skim enrichment in
-  // handleSearch (which runs before the state settles) tiers on the current set.
+  // the fetch effect (which intentionally does NOT re-run on filter changes)
+  // tiers on the current set.
   const activeRef = useRef(activeCategories);
   useEffect(() => { activeRef.current = activeCategories; }, [activeCategories]);
 
@@ -139,22 +147,38 @@ export default function App() {
   let lastVisitedYear: number | null = null;
   for (const y of visitedYears) lastVisitedYear = y;
 
-  async function handleSearch(year: number) {
-    if (loading) return;
-    dispatch({ type: 'SEARCH_START', year });
-    try {
-      const rawPool = await fetchYearEvents(year);
-      // Enrich only the first rendered slice (the ~60 skim), so first paint is
-      // fast regardless of pool depth. Enrichment never throws, but guard anyway.
-      const skim = selectRenderSlice(rawPool, activeRef.current);
-      const enrichedSkim = await enrichEvents(skim).catch(() => skim);
-      const seed: Record<string, HistoricalEvent> = {};
-      for (const e of enrichedSkim) seed[e.id] = e;
-      dispatch({ type: 'SEARCH_SUCCESS', year, pool: rawPool, enrichedById: seed });
-    } catch {
-      dispatch({ type: 'SEARCH_ERROR' });
-    }
-  }
+  // ── Fetch when the year in the URL changes ────────────────────────────────
+  // Keyed on the year only: toggling filters re-slices the pool in place and
+  // never refetches. Hydrates directly from a deep-link / refresh with no map
+  // flash (the detail scaffold + loading overlay show immediately).
+  useEffect(() => {
+    if (selectedYear === null) return;
+    const controller = new AbortController();
+    let cancelled = false;
+    dispatch({ type: 'FETCH_START', year: selectedYear });
+    (async () => {
+      try {
+        const rawPool = await fetchYearEvents(selectedYear, controller.signal);
+        // Enrich only the first rendered slice (the ~60 skim), tiered on the
+        // filters active at load time, so first paint is fast regardless of depth.
+        const skim = selectRenderSlice(rawPool, activeRef.current);
+        const enrichedSkim = await enrichEvents(skim).catch(() => skim);
+        const seed: Record<string, HistoricalEvent> = {};
+        for (const e of enrichedSkim) seed[e.id] = e;
+        if (!cancelled) dispatch({ type: 'FETCH_SUCCESS', year: selectedYear, pool: rawPool, enrichedById: seed });
+      } catch {
+        if (!cancelled) dispatch({ type: 'FETCH_ERROR' });
+      }
+    })();
+    // Abort the superseded request (year changed, or StrictMode remount) so it
+    // can't land in the catch and flash a spurious error over the live fetch.
+    return () => { cancelled = true; controller.abort(); };
+  }, [selectedYear]);
+
+  // Returning to the map (no year in the URL) closes any open card / error.
+  useEffect(() => {
+    if (selectedYear === null) dispatch({ type: 'CLOSE_DETAIL' });
+  }, [selectedYear]);
 
   // Lazy enrichment: whenever the rendered slice grows past what's cached (a
   // drill-in / filter change), resolve just the newly-revealed nodes and fold
@@ -170,12 +194,19 @@ export default function App() {
     return () => { cancelled = true; };
   }, [renderSlice, enrichedById]);
 
+  // ── URL-writing navigation ────────────────────────────────────────────────
+
+  /** Go to a year, preserving the current filter set. Pushes a history entry. */
+  function goToYear(year: number) {
+    navigate(yearPath(year, activeCategories));
+  }
+
   /** Step chronologically by one year, skipping the non-existent year 0. */
   function stepYear(delta: number) {
     if (selectedYear === null || loading) return;
     let target = selectedYear + delta;
     if (target === 0) target += delta;
-    handleSearch(target);
+    goToYear(target);
   }
 
   /** "I'm feeling lucky" — a random year in [1 CE, this year], never the current
@@ -187,7 +218,13 @@ export default function App() {
     while (target === selectedYear) { // avoid immediately repeating the current year
       target = 1 + Math.floor(Math.random() * maxYear);
     }
-    handleSearch(target);
+    goToYear(target);
+  }
+
+  /** Filter changes replace (not push) so toggling pills doesn't spam history. */
+  function handleCategories(next: Set<EventCategory>) {
+    if (selectedYear === null) return;
+    navigate(yearPath(selectedYear, next), { replace: true });
   }
 
   // Left/right arrows step years while in the detail view (ignored while typing).
@@ -202,7 +239,10 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDetail, selectedYear, loading]);
+  }, [isDetail, selectedYear, activeCategories, loading]);
+
+  // A bad year segment (e.g. /abc) is not a real route — bounce to the map.
+  if (invalidYear) return <Navigate to="/" replace />;
 
   return (
     <>
@@ -216,7 +256,7 @@ export default function App() {
           <YearMap
             visitedYears={visitedYears}
             lastVisitedYear={lastVisitedYear}
-            onYearSelect={handleSearch}
+            onYearSelect={goToYear}
           />
 
           {/* Map header — brand (left), search (centre / its own row on mobile),
@@ -227,7 +267,7 @@ export default function App() {
               <span className="chrono-brand-label display">Chronograph</span>
             </div>
 
-            <SearchBar mode="map" onSearch={handleSearch} />
+            <SearchBar mode="map" onSearch={goToYear} />
 
             <div className="chrono-map-controls">
               <LuckyButton onClick={handleLucky} disabled={loading} />
@@ -247,7 +287,7 @@ export default function App() {
               <button
                 type="button"
                 className="chrono-back-btn"
-                onClick={() => dispatch({ type: 'SHOW_MAP' })}
+                onClick={() => navigate('/')}
               >
                 ← Map
               </button>
@@ -275,7 +315,7 @@ export default function App() {
                 </button>
               </div>
 
-              <SearchBar mode="graph" onSearch={handleSearch} />
+              <SearchBar mode="graph" onSearch={goToYear} />
 
               <div className="chrono-detail-header-right">
                 <LuckyButton onClick={handleLucky} disabled={loading} />
@@ -286,7 +326,7 @@ export default function App() {
 
             <CategoryFilter
               active={activeCategories}
-              onChange={categories => dispatch({ type: 'SET_CATEGORIES', categories })}
+              onChange={handleCategories}
             />
           </div>
 

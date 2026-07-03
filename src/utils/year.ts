@@ -14,3 +14,18 @@
 export function formatYear(year: number): string {
   return year < 0 ? `${-year} BC` : `${year}`;
 }
+
+/**
+ * Parse a URL `:year` segment into a historical year, or null if invalid.
+ *
+ * Routing contract: the year segment is the same signed-integer form the search
+ * input accepts — a negative number is BC and there is no year 0 (so `/1894` is
+ * 1894 AD and `/-44` is 44 BC, which the UI then renders as "44 BC"). This is the
+ * app's single year convention; the URL does not introduce a second one.
+ */
+export function parseYearSlug(seg: string): number | null {
+  const t = seg.trim();
+  if (!/^-?\d+$/.test(t)) return null;
+  const n = parseInt(t, 10);
+  return n === 0 ? null : n;
+}

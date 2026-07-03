@@ -4,6 +4,7 @@ export type EventCategory =
   | 'event'
   | 'organization'
   | 'publication'
+  | 'media'
   | 'war'
   | 'discovery'
   | 'other';

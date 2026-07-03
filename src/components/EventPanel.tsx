@@ -11,6 +11,7 @@ const CATEGORY_LABELS: Record<EventCategory, string> = {
   event:        'Event',
   organization: 'Organization',
   publication:  'Publication',
+  media:        'Media',
   war:          'War',
   discovery:    'Discovery',
   other:        'Other',

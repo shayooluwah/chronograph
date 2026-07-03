@@ -6,14 +6,18 @@ import type { HistoricalEvent } from '../types';
  * function at /api/year and returns them as a typed HistoricalEvent array.
  *
  * @param year - The four-digit year to query (e.g. 1754)
+ * @param signal - Optional AbortSignal; aborting cancels the request (used to
+ *                 supersede an in-flight fetch when the year changes, and to stay
+ *                 clean under React StrictMode's double-invoked effects).
  * @throws {Error} when the network request fails or the server returns a
  *                 non-2xx status code
  */
-export async function fetchYearEvents(year: number): Promise<HistoricalEvent[]> {
+export async function fetchYearEvents(year: number, signal?: AbortSignal): Promise<HistoricalEvent[]> {
   const { data } = await axios.get<HistoricalEvent[]>('/api/year', {
     params: { year },
     // Surface an error instead of leaving the loading overlay up indefinitely
     timeout: 30_000,
+    signal,
   });
 
   return data;

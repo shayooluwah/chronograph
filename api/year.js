@@ -157,6 +157,17 @@ const Q_STATE     = '?item wdt:P31/wdt:P279* wd:Q3624078.';     // sovereign sta
 const Q_HISTSTATE = '?item wdt:P31/wdt:P279* wd:Q3024240.';     // historical country
 const Q_SPORT     = '?item wdt:P31/wdt:P279* wd:Q13406554.';    // sports competition
 const Q_ORG       = '?item wdt:P31/wdt:P279* wd:Q43229.';       // organization
+const Q_LITERARY  = '?item wdt:P31/wdt:P279* wd:Q7725634.';     // literary work — books/novels/plays only
+
+// Media classes — film, games, albums and paintings. Each is queried as its own
+// class-first branch (a VALUES disjunction over the subclass path would defeat
+// the class index, as with the two state classes above). Deliberately narrow:
+// broad abstract classes (musical work, "visual artwork") enumerate a huge
+// subtree and blow the time budget, so we use the concrete high-signal classes.
+const Q_FILM      = '?item wdt:P31/wdt:P279* wd:Q11424.';       // film
+const Q_GAME      = '?item wdt:P31/wdt:P279* wd:Q7889.';        // video game
+const Q_ALBUM     = '?item wdt:P31/wdt:P279* wd:Q482994.';      // album (covers notable music)
+const Q_PAINTING  = '?item wdt:P31/wdt:P279* wd:Q3305213.';     // painting
 
 // Per-branch `limit` is now a safety cap against pathological payloads, NOT a
 // notability trim: each branch returns as deep a sitelink-ranked pool as its
@@ -198,15 +209,40 @@ const QUERY_GROUPS = [
   { branches: [
     { category: 'event', dateProps: ['P585', 'P580'], classTriple: Q_SPORT, classFirst: true, minSitelinks: 8, limit: 40 },
   ], timeoutMs: 24_000 },
-  // Creations: publications (P577) and discoveries/inventions (P575) need no
-  // class test, so they go deep like the people branches. Organizations (P571)
-  // use the nested strategy (high-sitelink pre-cut, then the expensive org class
-  // path) so they stay bounded for speed.
+  // Creations: publications (P577) and discoveries/inventions (P575). Publications
+  // are narrowed to *literary* works — books, novels, plays — via the nested
+  // strategy (a high-sitelink pre-cut over the P577 range, then the literary-work
+  // class test), so films/albums/games/software (which also carry a P577
+  // publication date) are NOT swept in here; media types surface under 'media'.
+  // Discoveries need no class test. Organizations (P571) use the same nested
+  // strategy (pre-cut, then the expensive org class path) to stay bounded.
   { branches: [
-    { category: 'publication',  dateProps: ['P577'], minSitelinks: 8, limit: DEEP_LIMIT },
+    { category: 'publication',  dateProps: ['P577'], classTriple: Q_LITERARY, nested: true, minSitelinks: 8, nestedLimit: 250, limit: DEEP_LIMIT },
     { category: 'discovery',    dateProps: ['P575'], limit: 200 },
     { category: 'organization', dateProps: ['P571'], classTriple: Q_ORG, nested: true, minSitelinks: 12, nestedLimit: 150, limit: 60 },
   ] },
+  // Media splits into THREE isolated requests rather than one, because each media
+  // class is an expensive P279* subtree enumeration and stacking them in a single
+  // query blows the time budget (and one slow branch would empty the whole group).
+  // Split this way every branch stays comfortably under its timeout and degrades
+  // independently (like sports): a slow year loses at most one media flavour.
+  //
+  // Films + games — release date (P577), the highest-value modern media.
+  { branches: [
+    { category: 'media', dateProps: ['P577'], classTriple: Q_FILM, classFirst: true, minSitelinks: 4, limit: 60 },
+    { category: 'media', dateProps: ['P577'], classTriple: Q_GAME, classFirst: true, minSitelinks: 3, limit: 40 },
+  ], timeoutMs: 22_000 },
+  // Music albums — release date (P577). Its own request so the film/game class
+  // enumeration can't drag it over budget.
+  { branches: [
+    { category: 'media', dateProps: ['P577'], classTriple: Q_ALBUM, classFirst: true, minSitelinks: 4, limit: 40 },
+  ], timeoutMs: 20_000 },
+  // Paintings — inception (P571). The P571 scan is costly and low-yield for
+  // modern years, so it is isolated with a tight timeout and degrades to "no
+  // paintings" gracefully; either way paintings no longer land under Publications.
+  { branches: [
+    { category: 'media', dateProps: ['P571'], classTriple: Q_PAINTING, classFirst: true, minSitelinks: 4, limit: 40 },
+  ], timeoutMs: 20_000 },
   // Catch-all — a broad P571 (inception) scan with no class test, tagged 'other'
   // (the lowest dedup priority). Anything a named branch also matched keeps its
   // named sense (states → event, orgs → organization win the QID dedup), so only
@@ -221,13 +257,15 @@ const QUERY_GROUPS = [
 
 /** Categories a binding's ?cat may carry; anything else falls back to 'other'. */
 const VALID_CATEGORIES = new Set([
-  'birth', 'death', 'event', 'organization', 'publication', 'war', 'discovery', 'other',
+  'birth', 'death', 'event', 'organization', 'publication', 'media', 'war', 'discovery', 'other',
 ]);
 
 /** Dedup precedence when one QID surfaces under several categories (lower wins).
- *  'event' is the most generic, so a more specific sense always overrides it. */
+ *  'event' is the most generic, so a more specific sense always overrides it.
+ *  'media' outranks 'publication' so anything typed as a film/album/game/artwork
+ *  lands under Media even if it also carries a publication date. */
 const CATEGORY_PRIORITY = {
-  war: 0, birth: 1, death: 2, organization: 3, publication: 4, discovery: 5, event: 6, other: 7,
+  war: 0, birth: 1, death: 2, organization: 3, media: 4, publication: 5, discovery: 6, event: 7, other: 8,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ import type { GraphProps, NodeDatum, HistoricalEvent, EventCategory } from '../t
 // Round-robin order for spreading colours around the ring: one from each
 // category in turn, so no single colour concentrates in one arc.
 const CATEGORY_SEQUENCE: EventCategory[] = [
-  'war', 'event', 'birth', 'death', 'discovery', 'publication', 'organization', 'other',
+  'war', 'event', 'birth', 'death', 'discovery', 'publication', 'media', 'organization', 'other',
 ];
 
 /** Interleave the (per-category notability-ranked) events by round-robin across

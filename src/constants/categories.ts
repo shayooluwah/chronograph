@@ -12,6 +12,7 @@ export const CATEGORY_VAR: Record<EventCategory, string> = {
   event:        '--c-event',
   organization: '--c-org',
   publication:  '--c-pub',
+  media:        '--c-media',
   war:          '--c-war',
   discovery:    '--c-disc',
   other:        '--c-other',
@@ -24,6 +25,7 @@ export const FILTER_CATEGORIES: { id: EventCategory; label: string }[] = [
   { id: 'event',        label: 'Events'        },
   { id: 'organization', label: 'Organizations' },
   { id: 'publication',  label: 'Publications'  },
+  { id: 'media',        label: 'Media'         },
   { id: 'war',          label: 'Wars'          },
   { id: 'discovery',    label: 'Discoveries'   },
   { id: 'other',        label: 'Other'         },
@@ -43,8 +45,57 @@ export const CATEGORY_ORBIT: Record<EventCategory, number> = {
   death:        0.40,
   discovery:    0.44,
   publication:  0.47,
+  media:        0.49,
   organization: 0.51,
   other:        0.53,
   event:        0.57,
   war:          0.61,
 };
+
+// ── URL routing: category ⇄ slug ───────────────────────────────────────────────
+//
+// The URL uses the plural, lowercase pill label as a stable slug (e.g. `wars`,
+// `births`, `media`), not the internal singular id — so a shared link reads
+// naturally. Writing always sorts slugs alphabetically, so the same filter set
+// yields the same link regardless of the order pills were toggled.
+
+export const CATEGORY_SLUG: Record<EventCategory, string> = {
+  birth:        'births',
+  death:        'deaths',
+  event:        'events',
+  organization: 'organizations',
+  publication:  'publications',
+  media:        'media',
+  war:          'wars',
+  discovery:    'discoveries',
+  other:        'other',
+};
+
+const SLUG_TO_CATEGORY: Record<string, EventCategory> = Object.fromEntries(
+  Object.entries(CATEGORY_SLUG).map(([cat, slug]) => [slug, cat as EventCategory]),
+) as Record<string, EventCategory>;
+
+/**
+ * Parse a URL `:categories` segment into an active-category set. Unknown or
+ * malformed slugs are ignored; an absent segment (or one that resolves to
+ * nothing usable) falls back to "all categories active".
+ */
+export function parseCategorySlugs(seg: string | undefined): Set<EventCategory> {
+  if (!seg) return new Set(ALL_CATEGORIES);
+  const out = new Set<EventCategory>();
+  for (const raw of seg.split(',')) {
+    const cat = SLUG_TO_CATEGORY[raw.trim().toLowerCase()];
+    if (cat) out.add(cat);
+  }
+  return out.size ? out : new Set(ALL_CATEGORIES);
+}
+
+/**
+ * The canonical URL segment for a filter set: alphabetically-sorted slugs, or
+ * an empty string when every category is active (the default, written as a bare
+ * `/:year` with no category segment at all).
+ */
+export function categorySlugsSegment(active: Set<EventCategory>): string {
+  if (active.size >= ALL_CATEGORIES.size) return '';
+  return [...active].map(c => CATEGORY_SLUG[c]).sort().join(',');
+}

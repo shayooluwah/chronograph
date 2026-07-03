@@ -20,6 +20,7 @@
   --c-war:   #E2664F;
   --c-disc:  #5FA9CE;
   --c-other: #C2B488;
+  --c-media: #DE6FB0; /* films · music · games · visual art (magenta) */
 
   --accent:  #5FA9CE; /* onboarding tour + highlight ring (blue) */
 }
@@ -39,6 +40,7 @@
   --c-war:   #A33A28;
   --c-disc:  #2C6E8F;
   --c-other: #7A6E55;
+  --c-media: #AE4680; /* films · music · games · visual art (magenta) */
 
   --accent:  #2C6E8F; /* onboarding tour + highlight ring (blue) */
 }
