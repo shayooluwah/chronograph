@@ -10,6 +10,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
     <title>Chronograph</title>
+    <!-- CSP NOTE: this inline script is allowlisted by a sha256 hash in
+         vercel.json (Content-Security-Policy → script-src). If you change ANY
+         byte of the script below, recompute the hash from dist/index.html and
+         update vercel.json, or the browser will block it (theme flash). -->
     <script>
       // Apply the theme before first paint to avoid a flash of the wrong palette.
       (function () {

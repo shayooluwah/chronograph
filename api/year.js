@@ -291,8 +291,9 @@ async function runSparqlQuery(sparql, timeoutMs = 28_000) {
   const response = await fetch(url.toString(), {
     headers: {
       Accept: 'application/sparql-results+json',
-      // Wikidata requests a descriptive User-Agent
-      'User-Agent': 'Chronograph/1.0 (https://github.com/chronograph; contact@example.com)',
+      // Wikimedia UA policy requires a descriptive agent with a real contact
+      // point — a placeholder risks WDQS throttling/blocking us at real traffic.
+      'User-Agent': 'Chronograph/1.0 (+https://github.com/shayooluwah/chronograph)',
     },
     // Fail fast instead of letting one slow query hold the whole response. Kept
     // under the frontend's 30s axios timeout.
@@ -383,11 +384,17 @@ export default async function handler(req, res) {
   }
 
   // ── Validate ?year param ──────────────────────────────────────────────────
+  // Strict: a single, purely-numeric integer (parseInt would accept "1894abc",
+  // "1e300" and arrays), clamped to a range that covers all plausible history.
+  // Every request fans out to several WDQS queries, so junk input must die here
+  // rather than burn Wikidata's (and our) time budget.
   const rawYear = req.query?.year;
-  const year = parseInt(rawYear, 10);
-
-  if (!rawYear || isNaN(year)) {
+  if (typeof rawYear !== 'string' || !/^-?\d{1,6}$/.test(rawYear)) {
     return res.status(400).json({ error: 'Missing or invalid "year" query parameter.' });
+  }
+  const year = parseInt(rawYear, 10);
+  if (year === 0 || year < -100000 || year > 100000) {
+    return res.status(400).json({ error: '"year" out of supported range.' });
   }
 
   // ── Parallel SPARQL fetches (one request per group) ───────────────────────
@@ -402,8 +409,14 @@ export default async function handler(req, res) {
   const allOk   = groups.every((g) => g.ok);
 
   // ── Cache & respond ───────────────────────────────────────────────────────
-  // Only let the CDN cache complete responses; a degraded response (one or
-  // more groups failed) must not be served for the next 24 hours.
-  res.setHeader('Cache-Control', allOk ? 'public, max-age=86400' : 'no-store');
+  // Only cache complete responses; a degraded response (one or more groups
+  // failed) must not be served for the next 24 hours. `s-maxage` lets Vercel's
+  // CDN absorb repeat traffic for a year across *all* users (each uncached hit
+  // fans out to several WDQS queries, so shared caching is also abuse damping);
+  // `max-age` keeps the browser cache for the individual user.
+  res.setHeader(
+    'Cache-Control',
+    allOk ? 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400' : 'no-store',
+  );
   return res.status(200).json(results);
 }
