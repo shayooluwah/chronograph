@@ -64,7 +64,7 @@ function generateStars(): Star[] {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Starfield() {
-  const stars = useMemo(generateStars, []);
+  const stars = useMemo(() => generateStars(), []);
 
   return (
     <div className="stars" aria-hidden="true">
