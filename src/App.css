@@ -574,11 +574,15 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
 
 @media (max-width: 767px) {
   .event-panel {
-    position:      fixed;       /* bottom sheet, anchored to the viewport */
+    /* Bottom sheet anchored to the graph stage (which runs to the bottom of the
+       screen), not the viewport: the header + filter rows sit above the stage,
+       so capping the sheet at 100% of it keeps the close button clear of them
+       however tall the wrapped header gets. */
+    position:      absolute;
     inset:         auto 0 0 0;  /* top auto, sides 0, bottom 0 */
     width:         100%;
-    height:        72svh;
-    max-height:    72svh;
+    height:        min(72svh, 100%);
+    max-height:    100%;
     border-left:   none;
     border-top:    1px solid var(--text);
     border-radius: 10px 10px 0 0;
