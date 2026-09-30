@@ -368,7 +368,7 @@ export default function App() {
         <div
           role="alert"
           className="chrono-error-banner"
-          style={{ top: isDetail ? '110px' : '80px' }}
+          style={{ top: `calc(var(--site-bar-h) + ${isDetail ? 110 : 80}px)` }}
         >
           {error}
         </div>

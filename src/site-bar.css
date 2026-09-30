@@ -1,0 +1,49 @@
+/* Shared site bar: the strip across the top of the portfolio, Chronograph and
+   Flag Explorer. Keep this file identical in all three projects so the bar
+   looks the same wherever a visitor lands. Needs Outfit (500, 600) and
+   Poppins (700) from Google Fonts. */
+.sb {
+  --sb-h: 52px;
+  --sb-bg: #073861;
+  --sb-ink: #ffffff;
+  --sb-dim: rgba(255, 255, 255, .72);
+  --sb-accent: #2ec4a6;
+  position: sticky; top: 0; z-index: 1000;
+  display: flex; align-items: center; gap: 28px;
+  height: var(--sb-h);
+  padding: 0 clamp(16px, 3vw, 32px);
+  background: var(--sb-bg);
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  color: var(--sb-ink);
+  font: 500 14px/1 Outfit, system-ui, sans-serif;
+  letter-spacing: normal;
+  -webkit-font-smoothing: antialiased;
+}
+.sb *, .sb *::before, .sb *::after { box-sizing: border-box; }
+.sb a { color: inherit; text-decoration: none; }
+.sb a:focus-visible { outline: 2px solid var(--sb-accent); outline-offset: 3px; border-radius: 6px; }
+
+.sb-brand { display: inline-flex; align-items: center; gap: 12px; flex: none; font: 700 12px/1 Poppins, system-ui, sans-serif; letter-spacing: .28em; white-space: nowrap; }
+.sb-brand svg { width: 28px; height: 28px; display: block; flex: none; }
+
+/* Optional page-specific links (the portfolio puts its section links here) */
+.sb-slot { display: flex; gap: 26px; margin-left: auto; }
+.sb-slot a { color: var(--sb-dim); transition: color .2s; }
+.sb-slot a:hover { color: var(--sb-ink); }
+
+/* Switcher between the three sites; mark the current one with aria-current="page" */
+.sb-apps { display: flex; gap: 2px; margin-left: auto; padding: 3px; border-radius: 999px; background: rgba(255, 255, 255, .07); }
+.sb-slot + .sb-apps { margin-left: 0; }
+.sb-apps a { padding: 8px 14px; border-radius: 999px; color: var(--sb-dim); white-space: nowrap; transition: color .2s, background-color .2s; }
+.sb-apps a:hover { color: var(--sb-ink); background: rgba(255, 255, 255, .08); }
+.sb-apps a[aria-current="page"] { background: var(--sb-accent); color: var(--sb-bg); font-weight: 600; }
+.sb-short { display: none; }
+
+@media (max-width: 1100px) { .sb-slot { display: none; } .sb-slot + .sb-apps { margin-left: auto; } }
+@media (max-width: 720px) { .sb-name { display: none; } }
+@media (max-width: 480px) {
+  .sb { gap: 12px; }
+  .sb-apps a { padding: 8px 11px; font-size: 13px; }
+  .sb-long { display: none; }
+  .sb-short { display: inline; }
+}

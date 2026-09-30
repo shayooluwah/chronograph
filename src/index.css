@@ -22,7 +22,8 @@
   --c-other: #C2B488;
   --c-media: #DE6FB0; /* films · music · games · visual art (magenta) */
 
-  --accent:  #5FA9CE; /* onboarding tour + highlight ring (blue) */
+  --accent:     #2EC4A6; /* onboarding tour + highlight ring (portfolio teal) */
+  --accent-ink: #073861; /* text on an --accent fill */
 }
 
 :root[data-theme="light"] {
@@ -42,12 +43,17 @@
   --c-other: #7A6E55;
   --c-media: #AE4680; /* films · music · games · visual art (magenta) */
 
-  --accent:  #2C6E8F; /* onboarding tour + highlight ring (blue) */
+  --accent:     #0B7A68; /* onboarding tour + highlight ring (portfolio teal, darker for parchment) */
+  --accent-ink: #FFFFFF; /* text on an --accent fill */
 }
 
 :root {
   --display: 'Archivo', Helvetica, Arial, sans-serif;
   --mono:    'Space Mono', ui-monospace, monospace;
+
+  /* Height of the shared site bar (site-bar.css) above the app. Every
+     viewport-pinned layer starts below it. */
+  --site-bar-h: 52px;
 
   /* Optional warmth hook — to bring back a script wordmark, add
      family=Parisienne to the Google Fonts link in index.html and apply
@@ -70,6 +76,10 @@ body,
 
 body {
   transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+#root {
+  height: calc(100% - var(--site-bar-h)); /* the shared site bar sits above */
 }
 
 /* ── Texture layers — swapped per theme, behind all content, decorative ──────── */

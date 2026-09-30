@@ -8,7 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Space+Mono:wght@400;700&family=Outfit:wght@500;600&family=Poppins:wght@700&display=swap" rel="stylesheet" />
     <title>Chronograph</title>
     <!-- CSP NOTE: this inline script is allowlisted by a sha256 hash in
          vercel.json (Content-Security-Policy → script-src). If you change ANY
@@ -29,6 +29,19 @@
     </script>
   </head>
   <body>
+    <!-- Shared site bar: same markup and site-bar.css as the portfolio and Flag
+         Explorer. -->
+    <nav class="sb" aria-label="Site">
+      <a class="sb-brand" href="https://adeolu.co/" aria-label="Damilola Oyetayo, portfolio home">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect x=".5" y=".5" width="31" height="31" rx="8" fill="#0a4b82" stroke="#fff" stroke-opacity=".14"/><rect x="7" y="17" width="4" height="8" rx="1" fill="#2ec4a6"/><rect x="14" y="11" width="4" height="14" rx="1" fill="#fff"/><rect x="21" y="6" width="4" height="19" rx="1" fill="#2ec4a6"/></svg>
+        <span class="sb-name">DAMILOLA OYETAYO</span>
+      </a>
+      <div class="sb-apps">
+        <a href="https://adeolu.co/">Portfolio</a>
+        <a href="/" aria-current="page">Chronograph</a>
+        <a href="https://flags.adeolu.co/"><span class="sb-long">Flag Explorer</span><span class="sb-short">Flags</span></a>
+      </div>
+    </nav>
     <div id="root"></div>
     <script type="module" src="/src/index.tsx"></script>
   </body>

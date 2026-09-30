@@ -47,7 +47,7 @@
 
 .chrono-map-top {
   position:    fixed;
-  top:         0;
+  top:         var(--site-bar-h);
   left:        0;
   right:       0;
   z-index:     120;
@@ -94,7 +94,7 @@
    on narrow screens — no magic top offsets to keep in sync. */
 .chrono-detail-view {
   position:       fixed;
-  inset:          0;
+  inset:          var(--site-bar-h) 0 0 0;
   z-index:        10;
   display:        flex;
   flex-direction: column;
@@ -774,7 +774,7 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
 
 .chrono-loading {
   position:        fixed;
-  inset:           0;
+  inset:           var(--site-bar-h) 0 0 0; /* the shared site bar stays visible */
   z-index:         80;
   display:         flex;
   flex-direction:  column;
@@ -857,7 +857,7 @@ fieldset.chrono-filter-bar::-webkit-scrollbar {
 
 .year-map-container {
   position: fixed;
-  inset:    0;
+  inset:    var(--site-bar-h) 0 0 0;
   z-index:  10;
 }
 
@@ -1401,7 +1401,7 @@ fieldset.chrono-filter-bar,
   border:        none;
   border-radius: 6px;
   background:    var(--accent);
-  color:         #fff;
+  color:         var(--accent-ink);
 }
 
 .chrono-tour-btn-primary:hover {
