@@ -3,6 +3,7 @@ import { categoryColor } from '../utils/colors';
 import { formatYear } from '../utils/year';
 import { sentenceCase } from '../utils/text';
 import { useEventSummary } from '../hooks/useEventSummary';
+import { KOFI_URL } from '../constants/support';
 import type { HistoricalEvent, EventCategory } from '../types';
 
 const CATEGORY_LABELS: Record<EventCategory, string> = {
@@ -191,6 +192,11 @@ export default function EventPanel({ event, onClose }: EventPanelProps) {
             {event.wikipediaUrl ? 'Read more on Wikipedia' : 'View on Wikidata'}
             <ExternalLinkIcon />
           </a>
+          {/* One quiet ask, only once someone has opened an event */}
+          <p className="event-panel-support">
+            Enjoying Chronograph?{' '}
+            <a href={KOFI_URL} target="_blank" rel="noopener noreferrer">Buy me a coffee</a>
+          </p>
         </div>
       )}
     </dialog>

@@ -10,6 +10,7 @@ import Backdrop        from './components/Backdrop';
 import ThemeToggle     from './components/ThemeToggle';
 import AudioToggle     from './components/AudioToggle';
 import LuckyButton     from './components/LuckyButton';
+import CoffeeButton    from './components/CoffeeButton';
 import TourOverlay     from './components/TourOverlay';
 import { useAmbientAudio } from './hooks/useAmbientAudio';
 import { categorySlugsSegment, parseCategorySlugs } from './constants/categories';
@@ -270,6 +271,7 @@ export default function App() {
             <SearchBar mode="map" onSearch={goToYear} />
 
             <div className="chrono-map-controls">
+              <CoffeeButton />
               <LuckyButton onClick={handleLucky} disabled={loading} />
               <AudioToggle enabled={audioOn} onToggle={toggleAudio} />
               <ThemeToggle />
@@ -318,6 +320,7 @@ export default function App() {
               <SearchBar mode="graph" onSearch={goToYear} />
 
               <div className="chrono-detail-header-right">
+                <CoffeeButton />
                 <LuckyButton onClick={handleLucky} disabled={loading} />
                 <AudioToggle enabled={audioOn} onToggle={toggleAudio} />
                 <ThemeToggle />
