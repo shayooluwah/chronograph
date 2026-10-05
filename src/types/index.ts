@@ -28,6 +28,10 @@ export interface HistoricalEvent {
   /** Wikidata sitelink count — the notability proxy the API ranks by and the
    *  client sorts/slices on when tiering which nodes to render. */
   sitelinks?: number;
+  /** Set by the API for predecessor states (e.g. "Nigeria (as Federation of
+   *  Nigeria)"); label enrichment keeps these instead of the raw Wikidata label. */
+  titleOverride?: string;
+  descriptionOverride?: string;
 }
 
 export interface GraphNode {

@@ -251,14 +251,15 @@ export async function enrichEvents(events: HistoricalEvent[]): Promise<Historica
   }
 
   // 5. Project the resolved fields onto the events, keeping SPARQL data as the
-  //    fallback so an unresolved entity still renders its existing title.
+  //    fallback so an unresolved entity still renders its existing title. API
+  //    overrides (predecessor states such as Federation of Nigeria) win.
   return events.map(e => {
     const d = resolved.get(e.wikidataId);
     if (!d) return e;
     return {
       ...e,
-      title:       d.label?.trim()       || e.title,
-      description: d.description?.trim()  || e.description,
+      title:       e.titleOverride       ?? (d.label?.trim()       || e.title),
+      description: e.descriptionOverride ?? (d.description?.trim()  || e.description),
       ...(d.wikipediaUrl   ? { wikipediaUrl:   d.wikipediaUrl }   : {}),
       ...(d.wikidataUrl    ? { wikidataUrl:    d.wikidataUrl }    : {}),
       ...(d.wikipediaTitle ? { wikipediaTitle: d.wikipediaTitle } : {}),

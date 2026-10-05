@@ -367,6 +367,132 @@ function dedupeByQid(events) {
   return [...byId.values()];
 }
 
+// ── Transitional states ───────────────────────────────────────────────────────
+//
+// Some countries were founded as a short-lived predecessor state that Wikidata
+// models as its own item. Nigeria's 1960 independence sits on "Federation of
+// Nigeria" (Q5440850, 1960–63), while modern Nigeria (Q1033) carries P571 = 1963.
+// That predecessor has 14 sitelinks against Nigeria's 349, so it ranked near the
+// bottom of 1960 and never made the rendered skim, and its label didn't say
+// "Nigeria" at all.
+//
+// This query finds predecessors founded in the year whose one sovereign-state
+// "replaced by" (P1366) successor began within a couple of years of the
+// predecessor's end. They are relabelled "<modern> (as <predecessor>)" and
+// ranked by the successor's sitelinks. The wording is deliberately neutral:
+// some predecessors were independent (Federation of Nigeria, Tanganyika),
+// others colonial (Trust Territory of Nauru, Federation of Malaya), and nothing
+// in Wikidata reliably tells them apart, so "independence" would be wrong for
+// some. Labels come from rdfs:label because the client's label enrichment
+// would otherwise overwrite the title (it honours titleOverride instead).
+
+const TRANSITION_MAX_YEARS = 30; // predecessor lifespan cap (Dominion of Ceylon ran 24 years)
+const TRANSITION_GAP_YEARS = 2;  // successor must begin this close to the predecessor's end
+
+function buildTransitionalQuery(year) {
+  const [start, end] = yearBounds(year);
+  return `
+SELECT ?item ?itemLabel ?end ?succ ?succLabel ?succStart ?succSl WHERE {
+  ${Q_HISTSTATE}
+  ${dateMatch(['P571'], start, end)}
+  ?item wdt:P1366 ?succ.
+  ?succ wdt:P31 wd:Q3624078;
+        wikibase:sitelinks ?succSl.
+  OPTIONAL { ?item wdt:P576 ?end. }
+  OPTIONAL { ?succ wdt:P571 ?succStart. }
+  OPTIONAL { ?item rdfs:label ?itemLabel. FILTER(LANG(?itemLabel) = "en") }
+  OPTIONAL { ?succ rdfs:label ?succLabel. FILTER(LANG(?succLabel) = "en") }
+}`;
+}
+
+/** Astronomical year of a Wikidata xsd:dateTime ("1963-10-01T…", "-0043-…"). */
+function isoYear(value) {
+  const m = /^(-?\d+)-/.exec(value ?? '');
+  return m ? Number(m[1]) : null;
+}
+
+/** Display form of a historical (no-year-0) year: 1960, or "44 BCE". */
+function displayYear(historicalYear) {
+  return historicalYear < 0 ? `${-historicalYear} BCE` : String(historicalYear);
+}
+
+/**
+ * Applies the transitional-state rule to the query rows and returns overrides
+ * keyed by predecessor QID: { title, description, sitelinks }.
+ */
+function transitionalOverrides(bindings, year) {
+  const astro = toAstronomicalYear(year);
+
+  // Collapse rows (one per successor × successor start date) per predecessor.
+  const byItem = new Map();
+  for (const b of bindings) {
+    const id = extractWikidataId(b.item?.value ?? '');
+    const item = byItem.get(id) ?? { label: b.itemLabel?.value, end: isoYear(b.end?.value), succs: new Map() };
+    const sid = extractWikidataId(b.succ?.value ?? '');
+    const succ = item.succs.get(sid) ?? { label: b.succLabel?.value, sitelinks: Number(b.succSl?.value ?? 0), starts: new Set() };
+    const start = isoYear(b.succStart?.value);
+    if (start !== null) succ.starts.add(start);
+    item.succs.set(sid, succ);
+    byItem.set(id, item);
+  }
+
+  const overrides = new Map();
+  for (const [id, item] of byItem) {
+    // Exactly one sovereign successor: the Soviet Union (15) or apartheid South
+    // Africa (2) don't map to a single modern state.
+    if (item.succs.size !== 1 || !item.label || item.end === null) continue;
+    const [succ] = item.succs.values();
+    if (!succ.label) continue;
+    // Short-lived predecessors only: the German Reich (78 years) or the Ottoman
+    // Empire are histories of their own, not a founding stage of the successor.
+    if (item.end - astro > TRANSITION_MAX_YEARS) continue;
+    const starts = [...succ.starts];
+    // The modern state is already dated to this year (Dominion of India / India,
+    // 1947), so it appears under its own name anyway.
+    if (starts.includes(astro)) continue;
+    const became = starts.find((s) => Math.abs(s - item.end) <= TRANSITION_GAP_YEARS);
+    if (became === undefined) continue;
+    const becameYear = became <= 0 ? became - 1 : became; // astronomical → historical
+    overrides.set(id, {
+      title: `${succ.label} (as ${item.label})`,
+      description: `Established in ${displayYear(year)} as ${item.label}; became ${succ.label} in ${displayYear(becameYear)}.`,
+      sitelinks: succ.sitelinks,
+    });
+  }
+  return overrides;
+}
+
+async function fetchTransitional(year, timeoutMs = 20_000) {
+  try {
+    const data = await runSparqlQuery(buildTransitionalQuery(year), timeoutMs);
+    return { ok: true, overrides: transitionalOverrides(data?.results?.bindings ?? [], year) };
+  } catch (err) {
+    console.error('[year.js] Failed to fetch transitional states:', err.message);
+    return { ok: false, overrides: new Map() };
+  }
+}
+
+/** Relabels and re-ranks predecessor items in place; adds any the branches missed. */
+function applyTransitional(events, overrides, year) {
+  if (overrides.size === 0) return events;
+  const byId = new Map(events.map((e) => [e.id, e]));
+  for (const [id, o] of overrides) {
+    const fields = {
+      title: o.title,
+      titleOverride: o.title,
+      description: o.description,
+      descriptionOverride: o.description,
+    };
+    const existing = byId.get(id);
+    if (existing) {
+      Object.assign(existing, fields, { sitelinks: Math.max(existing.sitelinks ?? 0, o.sitelinks) });
+    } else {
+      events.push({ id, year, category: 'event', wikidataId: id, sitelinks: o.sitelinks, ...fields });
+    }
+  }
+  return events;
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
@@ -398,15 +524,24 @@ export default async function handler(req, res) {
   }
 
   // ── Parallel SPARQL fetches (one request per group) ───────────────────────
-  const groups = await Promise.all(
-    QUERY_GROUPS.map((group) =>
-      fetchGroup(buildGroupQuery(year, group.branches), year, group.timeoutMs),
+  // The transitional-state lookup is small (~1-2s) and runs alongside the groups.
+  const [groups, transitional] = await Promise.all([
+    Promise.all(
+      QUERY_GROUPS.map((group) =>
+        fetchGroup(buildGroupQuery(year, group.branches), year, group.timeoutMs),
+      ),
     ),
-  );
+    fetchTransitional(year),
+  ]);
 
-  // Merge every group, then dedup across branches by QID.
-  const results = dedupeByQid(groups.flatMap((g) => g.items));
-  const allOk   = groups.every((g) => g.ok);
+  // Merge every group, dedup across branches by QID, then relabel predecessor
+  // states (e.g. Federation of Nigeria → "Nigeria (as Federation of Nigeria)").
+  const results = applyTransitional(
+    dedupeByQid(groups.flatMap((g) => g.items)),
+    transitional.overrides,
+    year,
+  );
+  const allOk = groups.every((g) => g.ok) && transitional.ok;
 
   // ── Cache & respond ───────────────────────────────────────────────────────
   // Only cache complete responses; a degraded response (one or more groups
